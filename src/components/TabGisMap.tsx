@@ -100,6 +100,15 @@ function MapFlyTo({ centre, zoom }: { centre: [number, number]; zoom: number }) 
   return null;
 }
 
+// ─── Sub-component: capture and store reference to the Leaflet Map instance ───
+function MapRefSetter({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map;
+  }, [map, mapRef]);
+  return null;
+}
+
 
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -168,7 +177,11 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     });
     return null;
   };
-  const activeMarkers = markers.filter(m => m.locationId === locationId);
+  const activeMarkers = markers.filter(m => 
+    locationId === 'joshimath' 
+      ? m.locationId === 'joshimath' 
+      : (m.locationId === 'chennai' || m.locationId === 'wayanad')
+  );
   const centre = LOCATION_CENTRES[locationId];
   const zoom   = LOCATION_ZOOM[locationId];
 
@@ -228,7 +241,7 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
       setActiveEvacuationRoute(null);
       return;
     }
-    const safeNodes = activeMarkers.filter(m => m.status === 'safe');
+    const safeNodes = activeMarkers.filter(m => m.status === 'safe' && m.locationId === selectedMarker.locationId);
     if (!safeNodes.length) return;
 
     // Filter out compromised safe nodes (shelters within range of active threat)
@@ -372,6 +385,7 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
             className="z-0"
           >
             <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
+            <MapRefSetter mapRef={mapRef} />
             <MapFlyTo centre={centre} zoom={zoom} />
 
             {/* Hazard & shelter markers */}
