@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sliders, MapPin, AlertTriangle, Trash2, ShieldAlert, Thermometer, Droplet, Wind, CloudRain, Radio, Plus, Trash, Lock, Unlock, KeyRound, Home, Users, Check, Search, Crosshair } from 'lucide-react';
 import { DisasterType, IntensityLevel, LocationId, WeatherData, Announcement, HazardMarker } from '../types';
+import { smartGeocode, GeoResult } from '../hooks/useGeocoder';
 
 interface TabDemoControlsProps {
   simLocation: LocationId;
@@ -124,7 +125,7 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
 
-  // Smart multi-attempt geocoder — tries India-specific first, then global fallback
+  // Smart multi-source geocoder (Nominatim + Photon + fallback, query preprocessing)
   const fetchSuggestions = async (val: string) => {
     setLocQuery(val);
     if (!val.trim()) {
@@ -134,21 +135,10 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
     setSuggestLoading(true);
     setSuggestions([]);
     try {
-      // Attempt 1: Search with India context
-      const indiaUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(val + ' India')}&limit=5&accept-language=en`;
-      const r1 = await fetch(indiaUrl, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
-      let data: any[] = await r1.json();
-
-      // Attempt 2: If no results, try bare query without country constraint
-      if (!data || data.length === 0) {
-        const globalUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(val)}&limit=5&accept-language=en`;
-        const r2 = await fetch(globalUrl, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
-        data = await r2.json();
-      }
-
-      setSuggestions(data || []);
+      const results = await smartGeocode(val);
+      setSuggestions(results);
     } catch (err) {
-      console.error('Geocoding search failed:', err);
+      console.error('Geocoding failed:', err);
       setSuggestions([]);
     } finally {
       setSuggestLoading(false);
@@ -696,10 +686,20 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
 
                     {/* Suggestions list */}
                     {suggestLoading && (
-                      <div className="text-[9px] text-slate-500 italic mt-1 px-1">🔍 Searching global database…</div>
+                      <div className="text-[9px] text-cyan-400/80 italic mt-1 px-1 flex items-center gap-1.5">
+                        <span className="w-2 h-2 border border-cyan-400 border-t-transparent rounded-full animate-spin inline-block" />
+                        Searching OSM + Photon databases…
+                      </div>
                     )}
                     {!suggestLoading && locQuery.trim() && suggestions.length === 0 && (
-                      <div className="text-[9px] text-yellow-400/80 italic mt-1 px-1">⚠️ No results found. Try a nearby landmark or city name.</div>
+                      <div className="text-[9px] text-yellow-400/80 mt-1 px-1 space-y-0.5">
+                        <div>⚠️ Not found in any database. Tips:</div>
+                        <ul className="text-slate-500 text-[8px] list-disc list-inside space-y-0.5 pl-1">
+                          <li>Try the full official name (e.g. "Saint Josephs Institute of Technology")</li>
+                          <li>Add city: "SRM University Chennai"</li>
+                          <li>Try landmark near it instead</li>
+                        </ul>
+                      </div>
                     )}
                     {suggestions.length > 0 && (
                       <div className="bg-slate-900 border border-slate-700 rounded p-1 divide-y divide-slate-800 max-h-36 overflow-y-auto mt-1 font-mono">

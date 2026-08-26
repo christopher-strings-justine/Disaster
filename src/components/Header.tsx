@@ -144,6 +144,10 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 border-l border-slate-800 pl-3 shrink-0">
             <Wifi className="w-3 h-3 text-emerald-400" />
             <Database className="w-3 h-3 text-cyan-400" />
+            <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              SESSION SAVED
+            </span>
           </div>
         </div>
 

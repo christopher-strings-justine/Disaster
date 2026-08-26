@@ -6,6 +6,7 @@ import {
   Layers, ExternalLink, Crosshair, AlertTriangle, MapPin, Plus, Search
 } from 'lucide-react';
 import { HazardMarker, LocationId, WeatherData, UserGpsData, DisasterType } from '../types';
+import { smartGeocode, GeoResult } from '../hooks/useGeocoder';
 
 // Fix Leaflet default icon paths (broken in Vite/webpack builds)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -193,18 +194,8 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     setSearchResults([]);
     setSelectedResult(null);
     try {
-      // Attempt 1: append 'India' context for better local results
-      const url1 = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(searchQuery + ' India')}&limit=5&accept-language=en`;
-      const res1 = await fetch(url1, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
-      let data: any[] = await res1.json();
-
-      // Attempt 2: global fallback if no results
-      if (!data || data.length === 0) {
-        const url2 = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(searchQuery)}&limit=5&accept-language=en`;
-        const res2 = await fetch(url2, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
-        data = await res2.json();
-      }
-      setSearchResults(data || []);
+      const results = await smartGeocode(searchQuery);
+      setSearchResults(results);
     } catch (err) {
       console.error("Geocoding failed:", err);
       setSearchResults([]);
