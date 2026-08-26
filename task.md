@@ -1,0 +1,20 @@
+- [x] Re-style GIS map as OpenStreetMap Leaflet layer with Esri Satellite toggle
+- [x] Convert coordinate mapping to real-world GPS values for Chennai/Wayanad/Joshimath
+- [x] Configure Nominatim OSM search geocoding suggestions dropdown
+- [x] Integrate browser Geolocation API GPS button for registering safe zones
+- [x] Add Custom Radius of Severity slider and Leaflet Circle overlay
+- [x] Add Manual Hazard Threat Registry with "Clear Alert" buttons
+- [x] Implement mapRef callback ref for Locate Me dynamic fly-to (non-locking)
+- [x] Style GPS position indicator as pulsing Google Maps dot with accuracy circle
+- [x] Implement individual severity radii per incident threat
+- [x] Filter out compromised shelters (inside active threat radius) from OSRM AI routing
+- [x] Highlight compromised safe zones on map and logistics dashboard
+- [x] Add Map Click custom coordinate plotter popup form (when authenticated)
+- [x] Add Indian disaster presets spawner at random bounds coordinates
+- [x] Populate all districts across Tamil Nadu and Kerala with safe shelters and active hazard warning zones
+- [x] Enable joint South India map roaming view for all Tamil Nadu and Kerala markers
+- [x] Resolve Leaflet MapRef binding issue using child MapRefSetter (Locate Me fixed)
+- [x] Integrate Unified Plotting Command Desk inside Demo Control Portal tab (authorized panel)
+- [x] Replace Map sidebar hotlines with a single pulsing SOS Call 112 button (direct tel: dialer)
+- [x] Fix geosearch User-Agent blockages and inline rendering truncation in Demo Portal
+- [x] Compile and verify build completeness

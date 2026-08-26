@@ -127,14 +127,19 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
   // Search OSM Nominatim API
   const fetchSuggestions = async (val: string) => {
     setLocQuery(val);
-    if (val.trim().length < 3) {
+    if (!val.trim()) {
       setSuggestions([]);
       return;
     }
     setSuggestLoading(true);
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=in&limit=5`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=in&limit=5`,
+        {
+          headers: {
+            'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0'
+          }
+        }
       );
       const data = await response.json();
       setSuggestions(data || []);
@@ -644,21 +649,35 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
 
                 <form onSubmit={handleDeployPlottedAsset} className="space-y-3">
                   {/* Search bar */}
-                  <div className="space-y-1 relative">
-                    <label className="text-[9px] text-slate-500 uppercase block">Search Landmark / College / Sector</label>
-                    <div className="flex gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-slate-500 uppercase block font-bold">Search Landmark / College / Sector</label>
+                    <div className="flex gap-1.5">
                       <div className="relative flex-1">
                         <input
                           type="text"
                           placeholder="Search e.g. IIT Madras, KCG College..."
                           value={locQuery}
-                          onChange={(e) => fetchSuggestions(e.target.value)}
+                          onChange={(e) => setLocQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              fetchSuggestions(locQuery);
+                            }
+                          }}
                           className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 pr-8 text-[10px] text-slate-200 focus:outline-none"
                         />
                         {suggestLoading && (
                           <div className="absolute right-2.5 top-2.5 w-3.5 h-3.5 border border-cyan-400 border-t-transparent rounded-full animate-spin" />
                         )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchSuggestions(locQuery)}
+                        className="px-2.5 bg-cyan-500 hover:bg-cyan-600 text-slate-950 rounded font-black text-[9px] uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center"
+                        title="Search location"
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         type="button"
                         onClick={handleUseCurrentLocation}
@@ -672,15 +691,18 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
 
                     {/* Suggestions list */}
                     {suggestions.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-50 divide-y divide-slate-900 max-h-40 overflow-y-auto">
+                      <div className="bg-slate-900 border border-slate-800 rounded p-1 divide-y divide-slate-850 max-h-28 overflow-y-auto mt-1 font-mono">
                         {suggestions.map((sug, idx) => (
-                          <div
+                          <button
                             key={idx}
+                            type="button"
                             onClick={() => selectSuggestion(sug)}
-                            className="p-2 text-[9px] text-slate-350 hover:bg-slate-900 hover:text-slate-100 cursor-pointer truncate font-mono"
+                            className={`w-full text-left py-1 px-1.5 text-[9px] truncate block cursor-pointer transition-colors ${
+                              selectedResult?.place_id === sug.place_id ? 'text-cyan-400 font-bold' : 'text-slate-350 hover:text-slate-200'
+                            }`}
                           >
                             📍 {sug.display_name}
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}
