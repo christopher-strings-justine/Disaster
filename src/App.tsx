@@ -7,6 +7,20 @@ import { TabDispatchDesk } from './components/TabDispatchDesk';
 import { TabPipeline } from './components/TabPipeline';
 import { TabDemoControls } from './components/TabDemoControls';
 import { References } from './components/References';
+import { useLocalStorage } from './hooks/useLocalStorage';
+
+// ─── Schema Version Guard ────────────────────────────────────────────────────
+// Bump this string whenever the shape of persisted data changes.
+// On mismatch, all localStorage keys are wiped so stale data can't crash the app.
+const SCHEMA_VERSION = 'dp-v4';
+const storedVersion = localStorage.getItem('dp-schema-version');
+if (storedVersion !== SCHEMA_VERSION) {
+  // Clear all disaster-predictor keys
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith('dp-'))
+    .forEach((k) => localStorage.removeItem(k));
+  localStorage.setItem('dp-schema-version', SCHEMA_VERSION);
+}
 
 
 import {
@@ -36,28 +50,29 @@ import {
 import { Map, Users, Cpu, Wrench, Shield, AlertCircle, X, Sliders } from 'lucide-react';
 
 export const App: React.FC = () => {
-  // Navigation & Role states
-  const [activeTab, setActiveTab] = useState<'map' | 'roles' | 'cv' | 'dispatch' | 'pipeline' | 'control'>('map');
-  const [activeRole, setActiveRole] = useState<RoleType>('dma');
+  // ── Navigation & Role ─────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useLocalStorage<'map' | 'roles' | 'cv' | 'dispatch' | 'pipeline' | 'control'>('dp-activeTab', 'map');
+  const [activeRole, setActiveRole] = useLocalStorage<RoleType>('dp-activeRole', 'dma');
 
-  // Simulator Selector states
-  const [simLocation, setSimLocation] = useState<LocationId>('chennai');
-  const [simDisaster, setSimDisaster] = useState<DisasterType>('cloudburst');
-  const [simIntensity, setSimIntensity] = useState<IntensityLevel>('severe');
+  // ── Simulator Selector ────────────────────────────────────────────────────
+  const [simLocation, setSimLocation] = useLocalStorage<LocationId>('dp-simLocation', 'chennai');
+  const [simDisaster, setSimDisaster] = useLocalStorage<DisasterType>('dp-simDisaster', 'cloudburst');
+  const [simIntensity, setSimIntensity] = useLocalStorage<IntensityLevel>('dp-simIntensity', 'severe');
 
-  // Global simulation alarm states
-  const [systemAlert, setSystemAlert] = useState<boolean>(false);
-  const [alertMessage, setAlertMessage] = useState<string | null>(null);
-  const [activeDisasterInfo, setActiveDisasterInfo] = useState<{
+  // ── Disaster Alert State ──────────────────────────────────────────────────
+  const [systemAlert, setSystemAlert] = useLocalStorage<boolean>('dp-systemAlert', false);
+  const [alertMessage, setAlertMessage] = useLocalStorage<string | null>('dp-alertMessage', null);
+  const [activeDisasterInfo, setActiveDisasterInfo] = useLocalStorage<{
     disaster: DisasterType;
     intensity: IntensityLevel;
     location: LocationId;
-  } | null>(null);
+  } | null>('dp-activeDisasterInfo', null);
 
-  const [weather, setWeather] = useState<WeatherData>(INITIAL_WEATHER['chennai']);
-  const [announcements, setAnnouncements] = useState<Announcement[]>(INITIAL_ANNOUNCEMENTS);
+  // ── Weather & Announcements ───────────────────────────────────────────────
+  const [weather, setWeather] = useLocalStorage<WeatherData>('dp-weather', INITIAL_WEATHER['chennai']);
+  const [announcements, setAnnouncements] = useLocalStorage<Announcement[]>('dp-announcements', INITIAL_ANNOUNCEMENTS);
 
-  // User GPS Location State
+  // User GPS is transient — always starts null (device location, not persisted)
   const [userGps, setUserGps] = useState<UserGpsData | null>(null);
 
   // Reset GPS when location changes
@@ -65,25 +80,24 @@ export const App: React.FC = () => {
     setUserGps(null);
   }, [simLocation]);
 
-  // Official Command Authentication State
-  const [isOfficialAuthenticated, setIsOfficialAuthenticated] = useState<boolean>(false);
+  // ── Authentication ────────────────────────────────────────────────────────
+  // Persisted so authenticated session survives reload within same browser
+  const [isOfficialAuthenticated, setIsOfficialAuthenticated] = useLocalStorage<boolean>('dp-isAuthenticated', false);
 
-
-
-  // Sync baseline weather when location changes (if alert is inactive)
+  // Sync baseline weather when location changes (if no active alert)
   useEffect(() => {
     if (!systemAlert) {
       setWeather(INITIAL_WEATHER[simLocation]);
     }
   }, [simLocation, systemAlert]);
 
-  // Core Datasets states
-  const [markers, setMarkers] = useState<HazardMarker[]>(INITIAL_HAZARD_MARKERS);
-  const [shelters, setShelters] = useState<Shelter[]>(INITIAL_SHELTERS);
-  const [responders, setResponders] = useState<FieldResponder[]>(INITIAL_RESPONDERS);
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(INITIAL_WORK_ORDERS);
+  // ── Core Datasets ─────────────────────────────────────────────────────────
+  const [markers, setMarkers] = useLocalStorage<HazardMarker[]>('dp-markers', INITIAL_HAZARD_MARKERS);
+  const [shelters, setShelters] = useLocalStorage<Shelter[]>('dp-shelters', INITIAL_SHELTERS);
+  const [responders, setResponders] = useLocalStorage<FieldResponder[]>('dp-responders', INITIAL_RESPONDERS);
+  const [workOrders, setWorkOrders] = useLocalStorage<WorkOrder[]>('dp-workOrders', INITIAL_WORK_ORDERS);
 
-  // Evacuation routing states
+  // ── Evacuation Routing (transient — re-computed from map state) ───────────
   const [selectedMarker, setSelectedMarker] = useState<HazardMarker | null>(null);
   const [activeEvacuationRoute, setActiveEvacuationRoute] = useState<{
     routeCoords: [number, number][];
@@ -95,11 +109,11 @@ export const App: React.FC = () => {
     targetShelter: HazardMarker | null;
   } | null>(null);
 
-  // 10-Step Pipeline Active Step
-  const [activePipelineStep, setActivePipelineStep] = useState<number>(0); // Starts at 0 (PREDICT)
+  // ── 10-Step Pipeline ──────────────────────────────────────────────────────
+  const [activePipelineStep, setActivePipelineStep] = useLocalStorage<number>('dp-pipelineStep', 0);
 
-  // Custom severity radius and manual hazard clearance controls
-  const [severityRadius, setSeverityRadius] = useState<number>(1000); // default to 1000 meters
+  // ── Severity Radius ───────────────────────────────────────────────────────
+  const [severityRadius, setSeverityRadius] = useLocalStorage<number>('dp-severityRadius', 1000);
 
   const clearHazard = (id: string) => {
     setMarkers((prev) =>

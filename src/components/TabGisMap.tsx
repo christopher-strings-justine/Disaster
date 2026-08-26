@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, CircleMarker, Circle, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import {
-  Info, Navigation, ArrowRight, ShieldAlert, CloudRain, Check,
+  Info, Navigation, ArrowRight, Phone, CloudRain, Check,
   Layers, ExternalLink, Crosshair, AlertTriangle, MapPin, Plus, Search
 } from 'lucide-react';
 import { HazardMarker, LocationId, WeatherData, UserGpsData, DisasterType } from '../types';
@@ -193,16 +193,21 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     setSearchResults([]);
     setSelectedResult(null);
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5&countrycodes=in`;
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0'
-        }
-      });
-      const data = await res.json();
-      setSearchResults(data);
+      // Attempt 1: append 'India' context for better local results
+      const url1 = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(searchQuery + ' India')}&limit=5&accept-language=en`;
+      const res1 = await fetch(url1, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
+      let data: any[] = await res1.json();
+
+      // Attempt 2: global fallback if no results
+      if (!data || data.length === 0) {
+        const url2 = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(searchQuery)}&limit=5&accept-language=en`;
+        const res2 = await fetch(url2, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
+        data = await res2.json();
+      }
+      setSearchResults(data || []);
     } catch (err) {
-      console.error("Geocoding failed", err);
+      console.error("Geocoding failed:", err);
+      setSearchResults([]);
     }
     setSearchLoading(false);
   };
@@ -872,28 +877,179 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
           </div>
         )}
 
-        {/* Pulsing SOS Direct Call 112 button */}
+        {/* ── GEO COMMAND DESK (Search + Deploy) ── */}
+        {isOfficialAuthenticated && (
+          <div className="glass-panel rounded-xl p-4 border-t-4 border-t-purple-500 flex flex-col gap-3 font-mono">
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-purple-400" />
+              <h3 className="text-xs font-extrabold tracking-wider text-slate-100 uppercase">
+                GEO COMMAND DESK
+              </h3>
+            </div>
+            <p className="text-[9px] text-slate-500 -mt-1">Search any location globally and deploy as hazard or safe shelter</p>
+
+            {/* Search input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Search college, landmark, city…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearchGeocode(); } }}
+                className="flex-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none focus:border-purple-500 transition-colors"
+              />
+              <button
+                type="button"
+                onClick={handleSearchGeocode}
+                disabled={searchLoading}
+                className="px-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded font-black text-[9px] uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center"
+              >
+                {searchLoading ? (
+                  <div className="w-3.5 h-3.5 border border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Search className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+
+            {/* Search results */}
+            {!searchLoading && searchQuery.trim() && searchResults.length === 0 && (
+              <div className="text-[9px] text-yellow-400/80 italic px-1">⚠️ No results. Try adding a city or district name.</div>
+            )}
+            {searchResults.length > 0 && (
+              <div className="bg-slate-900 border border-slate-700 rounded p-1 divide-y divide-slate-800 max-h-36 overflow-y-auto">
+                {searchResults.map((res: any, idx: number) => {
+                  const parts = res.display_name.split(',');
+                  const main = parts[0]?.trim();
+                  const ctx = parts.slice(1, 3).join(',').trim();
+                  const tag = res.type || res.class || '';
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setSelectedResult(res);
+                        setSearchQuery(res.display_name.split(',')[0]);
+                        setSearchResults([]);
+                        if (mapRef.current) {
+                          mapRef.current.flyTo([parseFloat(res.lat), parseFloat(res.lon)], 16, { duration: 1.2 });
+                        }
+                      }}
+                      className={`w-full text-left py-1.5 px-2 text-[9px] block cursor-pointer transition-colors rounded-sm ${
+                        selectedResult?.place_id === res.place_id ? 'bg-purple-900/40 text-purple-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <span className="shrink-0 mt-0.5">📍</span>
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{main}</div>
+                          {ctx && <div className="text-slate-500 text-[8px] truncate">{ctx}</div>}
+                        </div>
+                        {tag && <span className="ml-auto shrink-0 text-[7px] bg-slate-800 text-slate-400 px-1 rounded uppercase">{tag}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Confirmed selection + deploy */}
+            {selectedResult && (
+              <div className="space-y-2 border-t border-slate-800 pt-2">
+                <div className="p-2 bg-purple-950/30 border border-purple-800/40 rounded text-[9px] font-mono">
+                  <div className="text-purple-300 font-bold truncate">{selectedResult.display_name.split(',')[0]}</div>
+                  <div className="text-slate-500 mt-0.5">{parseFloat(selectedResult.lat).toFixed(5)}°N, {parseFloat(selectedResult.lon).toFixed(5)}°E</div>
+                </div>
+
+                {/* Deploy type toggle */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProvisionType('hazard')}
+                    className={`flex-1 py-1 rounded text-[9px] uppercase font-black border transition-all cursor-pointer ${
+                      provisionType === 'hazard' ? 'bg-rose-500 text-slate-950 border-rose-400' : 'bg-slate-900 text-slate-500 border-slate-700'
+                    }`}
+                  >
+                    ⚠️ Hazard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProvisionType('shelter')}
+                    className={`flex-1 py-1 rounded text-[9px] uppercase font-black border transition-all cursor-pointer ${
+                      provisionType === 'shelter' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-500 border-slate-700'
+                    }`}
+                  >
+                    🛡️ Shelter
+                  </button>
+                </div>
+
+                {/* Disaster type (hazard only) */}
+                {provisionType === 'hazard' && (
+                  <select
+                    value={selectedDisasterType}
+                    onChange={(e) => setSelectedDisasterType(e.target.value as DisasterType)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
+                  >
+                    <option value="flood">🌊 Flood</option>
+                    <option value="landslide">🏔️ Landslide</option>
+                    <option value="cloudburst">⛈️ Cloudburst</option>
+                    <option value="earthquake">🌍 Earthquake</option>
+                    <option value="wildfire">🔥 Wildfire</option>
+                    <option value="tsunami">🌊 Tsunami</option>
+                    <option value="gasleak">☁️ Gas Leak</option>
+                    <option value="hailstorm">🧊 Hailstorm</option>
+                  </select>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleDeployProvision}
+                  className="w-full py-2 rounded bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-400 hover:to-cyan-400 text-slate-950 font-black text-[10px] uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Deploy to Map
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {/* ── EMERGENCY CALL BUTTON ── */}
         <a
           href="tel:112"
-          className="glass-panel rounded-xl p-4 border-2 border-rose-500/80 hover:border-rose-400 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 font-mono text-center flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(239,68,68,0.25)] hover:shadow-[0_0_25px_rgba(239,68,68,0.45)] group animate-pulse-slow shrink-0"
+          className="glass-panel rounded-xl overflow-hidden border-2 border-rose-500 hover:border-rose-300 bg-rose-950/30 hover:bg-rose-950/50 cursor-pointer transition-all shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:shadow-[0_0_40px_rgba(239,68,68,0.6)] group shrink-0"
+          title="Tap to call 112 — National Emergency"
         >
-          <div className="relative">
-            <div className="absolute inset-0 bg-rose-500 rounded-full blur opacity-45 group-hover:opacity-75 transition-opacity animate-ping"></div>
-            <div className="relative p-3 bg-rose-500 rounded-full border border-rose-400 text-slate-950">
-              <ShieldAlert className="w-5.5 h-5.5 animate-pulse" />
+          {/* Top label strip */}
+          <div className="bg-rose-500/20 border-b border-rose-500/40 px-4 py-1.5 flex items-center justify-center gap-2">
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-rose-300">📞 EMERGENCY CALL</span>
+          </div>
+
+          {/* Phone icon + number — the main tap target */}
+          <div className="flex items-center gap-4 px-5 py-4">
+            {/* Animated phone icon */}
+            <div className="relative shrink-0">
+              {/* Outer ping ring */}
+              <div className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping" />
+              {/* Inner glow */}
+              <div className="relative w-14 h-14 rounded-full bg-rose-500 flex items-center justify-center border-2 border-rose-300 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(239,68,68,0.7)]">
+                <Phone className="w-7 h-7 text-white" strokeWidth={2.5} />
+              </div>
+            </div>
+
+            {/* Text */}
+            <div className="text-left">
+              <div className="text-2xl font-black text-white tracking-widest font-mono leading-none">112</div>
+              <div className="text-[10px] font-bold text-rose-300 uppercase tracking-wider mt-0.5">National Emergency</div>
+              <div className="text-[9px] text-slate-500 mt-1">Police · Fire · Ambulance</div>
             </div>
           </div>
-          <div className="space-y-0.5 mt-1">
-            <span className="text-[10px] font-black uppercase tracking-wider block text-rose-400">
-              SOS EMERGENCY DIRECT DIAL
-            </span>
-            <span className="text-[13px] font-black text-rose-100 font-mono tracking-widest block">
-              CALL 112
-            </span>
+
+          {/* Bottom instruction */}
+          <div className="bg-slate-950/40 border-t border-rose-900/40 px-4 py-1.5 text-center">
+            <span className="text-[8px] text-slate-400 font-mono uppercase tracking-wider">Single tap connects to control room</span>
           </div>
-          <span className="text-[8px] text-slate-500 font-bold uppercase block border-t border-slate-900/60 pt-1.5 w-full">
-            Single-click to connect National Control Room
-          </span>
         </a>
       </div>
     </div>

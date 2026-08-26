@@ -124,7 +124,7 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
 
-  // Search OSM Nominatim API
+  // Smart multi-attempt geocoder — tries India-specific first, then global fallback
   const fetchSuggestions = async (val: string) => {
     setLocQuery(val);
     if (!val.trim()) {
@@ -132,19 +132,24 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
       return;
     }
     setSuggestLoading(true);
+    setSuggestions([]);
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=in&limit=5`,
-        {
-          headers: {
-            'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0'
-          }
-        }
-      );
-      const data = await response.json();
+      // Attempt 1: Search with India context
+      const indiaUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(val + ' India')}&limit=5&accept-language=en`;
+      const r1 = await fetch(indiaUrl, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
+      let data: any[] = await r1.json();
+
+      // Attempt 2: If no results, try bare query without country constraint
+      if (!data || data.length === 0) {
+        const globalUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(val)}&limit=5&accept-language=en`;
+        const r2 = await fetch(globalUrl, { headers: { 'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0' } });
+        data = await r2.json();
+      }
+
       setSuggestions(data || []);
     } catch (err) {
-      console.error('Geocoding search failed', err);
+      console.error('Geocoding search failed:', err);
+      setSuggestions([]);
     } finally {
       setSuggestLoading(false);
     }
@@ -690,20 +695,39 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
                     </div>
 
                     {/* Suggestions list */}
+                    {suggestLoading && (
+                      <div className="text-[9px] text-slate-500 italic mt-1 px-1">🔍 Searching global database…</div>
+                    )}
+                    {!suggestLoading && locQuery.trim() && suggestions.length === 0 && (
+                      <div className="text-[9px] text-yellow-400/80 italic mt-1 px-1">⚠️ No results found. Try a nearby landmark or city name.</div>
+                    )}
                     {suggestions.length > 0 && (
-                      <div className="bg-slate-900 border border-slate-800 rounded p-1 divide-y divide-slate-850 max-h-28 overflow-y-auto mt-1 font-mono">
-                        {suggestions.map((sug, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => selectSuggestion(sug)}
-                            className={`w-full text-left py-1 px-1.5 text-[9px] truncate block cursor-pointer transition-colors ${
-                              selectedResult?.place_id === sug.place_id ? 'text-cyan-400 font-bold' : 'text-slate-350 hover:text-slate-200'
-                            }`}
-                          >
-                            📍 {sug.display_name}
-                          </button>
-                        ))}
+                      <div className="bg-slate-900 border border-slate-700 rounded p-1 divide-y divide-slate-800 max-h-36 overflow-y-auto mt-1 font-mono">
+                        {suggestions.map((sug, idx) => {
+                          const nameParts = sug.display_name.split(',');
+                          const mainName = nameParts[0]?.trim();
+                          const ctxAddr = nameParts.slice(1, 3).join(',').trim();
+                          const typeTag = sug.type || sug.class || '';
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => selectSuggestion(sug)}
+                              className={`w-full text-left py-1.5 px-2 text-[9px] block cursor-pointer transition-colors rounded-sm ${
+                                selectedResult?.place_id === sug.place_id ? 'bg-cyan-900/40 text-cyan-300 font-bold' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-start gap-1.5">
+                                <span className="mt-0.5 shrink-0">📍</span>
+                                <div className="min-w-0">
+                                  <div className="font-semibold truncate">{mainName}</div>
+                                  {ctxAddr && <div className="text-slate-500 truncate text-[8px]">{ctxAddr}</div>}
+                                </div>
+                                {typeTag && <span className="ml-auto shrink-0 text-[7px] bg-slate-800 text-slate-400 px-1 rounded uppercase">{typeTag}</span>}
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
