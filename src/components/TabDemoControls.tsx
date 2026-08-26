@@ -112,12 +112,12 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
   // Authorization Form State
   const [pinVal, setPinVal] = useState('');
 
-  // Shelter Registration State
-  const [shelterName, setShelterName] = useState('');
-  const [shelterRegion, setShelterRegion] = useState<LocationId>('chennai');
-  const [shelterLat, setShelterLat] = useState('');
-  const [shelterLng, setShelterLng] = useState('');
-  const [shelterCapacity, setShelterCapacity] = useState('');
+  // Shelter & Hazard Provisioning States
+  const [provisionType, setProvisionType] = useState<'hazard' | 'shelter'>('hazard');
+  const [selectedResult, setSelectedResult] = useState<any | null>(null);
+  const [selectedDisasterType, setSelectedDisasterType] = useState<DisasterType>('cloudburst');
+  const [customRadiusVal, setCustomRadiusVal] = useState(1500);
+  const [shelterCapacity, setShelterCapacity] = useState('800');
 
   // Auto-suggest and Geocoding States
   const [locQuery, setLocQuery] = useState('');
@@ -144,68 +144,89 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
       setSuggestLoading(false);
     }
   };
-
   const selectSuggestion = (sug: any) => {
-    const lat = parseFloat(sug.lat);
-    const lng = parseFloat(sug.lon);
-    setShelterLat(lat.toString());
-    setShelterLng(sug.lon);
-    
-    // Auto-fill shelter name with a cleaned version of the address
-    const nameParts = sug.display_name.split(',');
-    const simpleName = nameParts.slice(0, 2).join(',').trim();
-    setShelterName(simpleName);
+    setSelectedResult(sug);
     setLocQuery(sug.display_name);
     setSuggestions([]);
-
-    // Auto-detect Regional Sector from coordinates
-    if (lat >= 12.8 && lat <= 13.2 && lng >= 80.1 && lng <= 80.4) {
-      setShelterRegion('chennai');
-    } else if (lat >= 11.4 && lat <= 11.7 && lng >= 75.9 && lng <= 76.2) {
-      setShelterRegion('wayanad');
-    } else if (lat >= 30.3 && lat <= 30.7 && lng >= 79.3 && lng <= 79.7) {
-      setShelterRegion('joshimath');
-    }
   };
 
-  // Browser Geolocation API
   const handleUseCurrentLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
-          setShelterLat(lat.toFixed(6));
-          setShelterLng(lng.toFixed(6));
-          setLocQuery(`Device GPS Location (${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E)`);
-          if (!shelterName) {
-            setShelterName(`Active GPS Relief Shelter`);
-          }
-          // Set appropriate region sector
-          if (lat >= 12.8 && lat <= 13.2 && lng >= 80.1 && lng <= 80.4) {
-            setShelterRegion('chennai');
-          } else if (lat >= 11.4 && lat <= 11.7 && lng >= 75.9 && lng <= 76.2) {
-            setShelterRegion('wayanad');
-          } else if (lat >= 30.3 && lat <= 30.7 && lng >= 79.3 && lng <= 79.7) {
-            setShelterRegion('joshimath');
-          }
+          const dummyResult = {
+            place_id: `gps-${Date.now()}`,
+            display_name: `Device GPS Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+            lat: lat.toString(),
+            lon: lng.toString()
+          };
+          setSelectedResult(dummyResult);
+          setLocQuery(dummyResult.display_name);
         },
-        (err) => {
+        () => {
           const defaults: Record<LocationId, [number, number]> = {
             chennai: [12.9762, 80.2181],
             wayanad: [11.5755, 76.0533],
             joshimath: [30.5618, 79.5643],
           };
-          const [lat, lng] = defaults[shelterRegion];
-          setShelterLat(lat.toString());
-          setShelterLng(lng.toString());
-          setLocQuery(`Fallback GPS Location (${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E)`);
-          if (!shelterName) {
-            setShelterName(`GPS Safe Resettlement Haven`);
-          }
+          const [lat, lng] = defaults[simLocation] || [12.9762, 80.2181];
+          const dummyResult = {
+            place_id: `gps-fallback-${Date.now()}`,
+            display_name: `Fallback GPS Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+            lat: lat.toString(),
+            lon: lng.toString()
+          };
+          setSelectedResult(dummyResult);
+          setLocQuery(dummyResult.display_name);
         }
       );
     }
+  };
+
+  const handleDeployPlottedAsset = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedResult) {
+      alert("⚠️ Coordinate target unselected. Please search a landmark and select from resolved suggestions.");
+      return;
+    }
+    const lat = parseFloat(selectedResult.lat);
+    const lng = parseFloat(selectedResult.lon);
+
+    const markerId = `${provisionType}-custom-${Date.now()}`;
+    const cleanName = selectedResult.display_name.split(',')[0];
+    
+    const hazardLabels: Record<DisasterType, string> = {
+      cloudburst: "Cloudburst Runoff",
+      landslide: "Debris Landslide",
+      flood: "Urban Drainage Flooding Inundation",
+      earthquake: "Seismic Ground Tremor Event",
+      wildfire: "Active Forest Wildfire Incident",
+      tsunami: "Coastal Tsunami Wave Surge",
+      gasleak: "Industrial Toxic Gas Leak Cloud",
+      hailstorm: "Severe Ice Hailstorm Event",
+    };
+
+    const newMarker: HazardMarker = {
+      id: markerId,
+      name: provisionType === 'shelter' ? `${cleanName} Relief Camp` : `${hazardLabels[selectedDisasterType]}`,
+      locationId: simLocation,
+      risk: provisionType === 'shelter' ? 2 : 85,
+      status: provisionType === 'shelter' ? 'safe' : 'danger',
+      details: provisionType === 'shelter' ? `Live provisioned government refuge shelter.` : `Live mapped geographical hazard threat.`,
+      population: provisionType === 'shelter' ? 0 : 350,
+      lat,
+      lng,
+      radius: provisionType === 'shelter' ? undefined : customRadiusVal,
+    };
+
+    registerCustomMarker(newMarker);
+    
+    // Reset state
+    setLocQuery('');
+    setSuggestions([]);
+    setSelectedResult(null);
   };
 
   // Responder Registration State
@@ -226,23 +247,6 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
     const success = authenticateOfficial(pinVal);
     if (success) {
       setPinVal('');
-    }
-  };
-
-  const handleShelterSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const lat = parseFloat(shelterLat);
-    const lng = parseFloat(shelterLng);
-    const cap = parseInt(shelterCapacity);
-
-    if (shelterName && !isNaN(lat) && !isNaN(lng) && !isNaN(cap)) {
-      registerShelter(shelterName, shelterRegion, lat, lng, cap);
-      // Reset form
-      setShelterName('');
-      setShelterLat('');
-      setShelterLng('');
-      setShelterCapacity('');
-      setLocQuery('');
     }
   };
 
@@ -327,6 +331,10 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
                     <option value="landslide" className="bg-slate-950 text-slate-200">Severe Landslide</option>
                     <option value="earthquake" className="bg-slate-950 text-slate-200">Seismic Tremor (M5.2)</option>
                     <option value="flood" className="bg-slate-950 text-slate-200">River Flash Flood</option>
+                    <option value="wildfire" className="bg-slate-950 text-slate-200">Forest Wildfire</option>
+                    <option value="tsunami" className="bg-slate-950 text-slate-200">Tsunami Surge</option>
+                    <option value="gasleak" className="bg-slate-950 text-slate-200">Chemical Gas Leak</option>
+                    <option value="hailstorm" className="bg-slate-950 text-slate-200">Severe Hailstorm</option>
                   </select>
                 </div>
               </div>
@@ -625,50 +633,24 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
 
             {/* Forms Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-xs">
-              
-              {/* Form 1: Register Shelter */}
+                      {/* Form 1: Unified Plotting Command Desk */}
               <div className="space-y-4 border-r border-slate-900 pr-0 md:pr-8">
                 <div className="flex items-center gap-1.5 text-slate-200 border-b border-slate-900 pb-1.5">
-                  <Home className="w-4 h-4 text-cyan-400" />
+                  <Plus className="w-4 h-4 text-cyan-400" />
                   <span className="font-bold uppercase tracking-wider text-[10px]">
-                    Register Resettlement Safe Shelter
+                    Unified Geoprovisioning Desk
                   </span>
                 </div>
-                <form onSubmit={handleShelterSubmit} className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-slate-500 uppercase block">Shelter Name</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Helang Community Hall"
-                        value={shelterName}
-                        onChange={(e) => setShelterName(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-slate-500 uppercase block">Region Sector</label>
-                      <select
-                        value={shelterRegion}
-                        onChange={(e) => setShelterRegion(e.target.value as LocationId)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
-                      >
-                        <option value="chennai">Chennai Sector</option>
-                        <option value="wayanad">Wayanad Hills</option>
-                        <option value="joshimath">Joshimath Valley</option>
-                      </select>
-                    </div>
-                  </div>
 
-                  {/* Location Auto-Suggest Input */}
+                <form onSubmit={handleDeployPlottedAsset} className="space-y-3">
+                  {/* Search bar */}
                   <div className="space-y-1 relative">
-                    <label className="text-[9px] text-slate-500 uppercase block">Search Location (Auto-Suggest Coordinates)</label>
+                    <label className="text-[9px] text-slate-500 uppercase block">Search Landmark / College / Sector</label>
                     <div className="flex gap-2">
                       <div className="relative flex-1">
                         <input
                           type="text"
-                          placeholder="Search e.g. Velachery, Chennai..."
+                          placeholder="Search e.g. IIT Madras, KCG College..."
                           value={locQuery}
                           onChange={(e) => fetchSuggestions(e.target.value)}
                           className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 pr-8 text-[10px] text-slate-200 focus:outline-none"
@@ -704,37 +686,92 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
                     )}
                   </div>
 
+                  {/* Provision Type Selection */}
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-slate-500 uppercase block">Deployment Type</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setProvisionType('hazard')}
+                        className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
+                          provisionType === 'hazard' ? 'bg-rose-500 text-slate-950 border-rose-400' : 'bg-slate-900 text-slate-450 border-slate-800'
+                        }`}
+                      >
+                        Deploy Threat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProvisionType('shelter')}
+                        className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
+                          provisionType === 'shelter' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-450 border-slate-800'
+                        }`}
+                      >
+                        Deploy Shelter
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dynamic Configurations based on Provision Type */}
+                  {provisionType === 'hazard' ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-slate-500 uppercase block">Disaster Preset</label>
+                        <select
+                          value={selectedDisasterType}
+                          onChange={(e) => setSelectedDisasterType(e.target.value as DisasterType)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-202 focus:outline-none"
+                        >
+                          <option value="cloudburst">Cloudburst Runoff</option>
+                          <option value="landslide">Debris Landslide</option>
+                          <option value="flood">Flood Inundation</option>
+                          <option value="earthquake">Earthquake Tremor</option>
+                          <option value="wildfire">Forest Wildfire</option>
+                          <option value="tsunami">Tsunami Surge</option>
+                          <option value="gasleak">Toxic Gas Leak</option>
+                          <option value="hailstorm">Severe Hailstorm</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-slate-500 uppercase block font-mono">Radius (m)</label>
+                        <input
+                          type="number"
+                          value={customRadiusVal}
+                          onChange={(e) => setCustomRadiusVal(Number(e.target.value))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-slate-500 uppercase block">Beds Capacity</label>
+                      <input
+                        type="number"
+                        value={shelterCapacity}
+                        onChange={(e) => setShelterCapacity(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none font-mono"
+                      />
+                    </div>
+                  )}
+
                   {/* Resolved Coordinate Display */}
-                  <div className="bg-slate-950 border border-slate-900 rounded p-2.5 flex items-center justify-between">
-                    <span className="text-[9px] text-slate-500 uppercase">Resolved Coordinates</span>
-                    {shelterLat && shelterLng ? (
+                  <div className="bg-slate-950 border border-slate-900 rounded p-2 flex items-center justify-between">
+                    <span className="text-[9px] text-slate-500 uppercase">Selected Coordinates</span>
+                    {selectedResult ? (
                       <span className="text-[10px] text-cyan-400 font-mono font-bold">
-                        📍 {parseFloat(shelterLat).toFixed(4)}°N, {parseFloat(shelterLng).toFixed(4)}°E
+                        📍 {parseFloat(selectedResult.lat).toFixed(4)}°N, {parseFloat(selectedResult.lon).toFixed(4)}°E
                       </span>
                     ) : (
                       <span className="text-[10px] text-rose-500 font-mono animate-pulse">
-                        No coordinates loaded
+                        No target locked
                       </span>
                     )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[9px] text-slate-500 uppercase block">Bed Capacity</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 350"
-                      value={shelterCapacity}
-                      onChange={(e) => setShelterCapacity(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none font-mono"
-                      required
-                    />
                   </div>
 
                   <button
                     type="submit"
                     className="w-full py-2 rounded bg-cyan-400 hover:bg-cyan-500 text-slate-950 font-black text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
                   >
-                    Add Resettlement Haven
+                    Deploy Plotted Asset
                   </button>
                 </form>
               </div>

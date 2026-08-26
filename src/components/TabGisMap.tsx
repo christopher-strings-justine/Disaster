@@ -3,9 +3,9 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, CircleMarker,
 import L from 'leaflet';
 import {
   Info, Navigation, ArrowRight, ShieldAlert, CloudRain, Check,
-  Layers, ExternalLink, Crosshair, AlertTriangle, MapPin
+  Layers, ExternalLink, Crosshair, AlertTriangle, MapPin, Plus, Search
 } from 'lucide-react';
-import { HazardMarker, LocationId, WeatherData, UserGpsData } from '../types';
+import { HazardMarker, LocationId, WeatherData, UserGpsData, DisasterType } from '../types';
 
 // Fix Leaflet default icon paths (broken in Vite/webpack builds)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -176,6 +176,85 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
       }
     });
     return null;
+  };
+
+  // Unified Provisioning & Geocoding Search States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [provisionType, setProvisionType] = useState<'hazard' | 'shelter'>('hazard');
+  const [selectedResult, setSelectedResult] = useState<any | null>(null);
+  const [selectedDisasterType, setSelectedDisasterType] = useState<DisasterType>('cloudburst');
+  const [customRadiusVal, setCustomRadiusVal] = useState(1500);
+
+  const handleSearchGeocode = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    setSearchResults([]);
+    setSelectedResult(null);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5&countrycodes=in`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'DisasterPredictor-SIH-CodeNova/1.0'
+        }
+      });
+      const data = await res.json();
+      setSearchResults(data);
+    } catch (err) {
+      console.error("Geocoding failed", err);
+    }
+    setSearchLoading(false);
+  };
+
+  const handleDeployProvision = () => {
+    if (!isOfficialAuthenticated) {
+      alert("⚠️ ACCESS LOCKED: Please authenticate as Command Officer in the 'Demo Control Portal' or click the lock button in the header.");
+      return;
+    }
+    if (!selectedResult) {
+      alert("⚠️ Target coordinate unselected. Please query a location and select a resolved result.");
+      return;
+    }
+    const lat = parseFloat(selectedResult.lat);
+    const lng = parseFloat(selectedResult.lon);
+
+    const markerId = `${provisionType}-custom-${Date.now()}`;
+    const cleanName = selectedResult.display_name.split(',')[0];
+    
+    const hazardLabels: Record<DisasterType, string> = {
+      cloudburst: "Cloudburst Event",
+      landslide: "Active Slope Failure Landslide",
+      flood: "Urban Drainage Flooding Inundation",
+      earthquake: "Seismic Ground Tremor Event",
+      wildfire: "Active Forest Wildfire Incident",
+      tsunami: "Coastal Tsunami Wave Surge",
+      gasleak: "Industrial Toxic Gas Leak Cloud",
+      hailstorm: "Severe Ice Hailstorm Event",
+    };
+
+    const newMarker: HazardMarker = {
+      id: markerId,
+      name: provisionType === 'shelter' ? `${cleanName} Relief Camp` : `${hazardLabels[selectedDisasterType]}`,
+      locationId: locationId,
+      risk: provisionType === 'shelter' ? 2 : 82,
+      status: provisionType === 'shelter' ? 'safe' : 'danger',
+      details: provisionType === 'shelter' ? `Live provisioned government refuge shelter.` : `Live mapped geographical hazard threat.`,
+      population: provisionType === 'shelter' ? 0 : 350,
+      lat,
+      lng,
+      radius: provisionType === 'shelter' ? undefined : customRadiusVal,
+    };
+
+    registerCustomMarker(newMarker);
+    
+    if (mapRef.current) {
+      mapRef.current.flyTo([lat, lng], 14, { duration: 1.2 });
+    }
+
+    setSearchQuery('');
+    setSearchResults([]);
+    setSelectedResult(null);
   };
   const activeMarkers = markers.filter(m => 
     locationId === 'joshimath' 
@@ -632,7 +711,11 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
       </div>
 
       {/* ── EVACUATION SIDEBAR ───────────────────────────────────────────── */}
-      <div className="w-full xl:w-96 flex flex-col gap-4">
+      <div className="w-full xl:w-96 flex flex-col gap-4 shrink-0">
+        
+
+
+        {/* ── EVACUATION OPTIMIZER CARD ── */}
         <div className="glass-panel rounded-xl p-5 border-t-4 border-t-cyan-500 shadow-xl flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <Navigation className="w-4.5 h-4.5 text-cyan-400" />
@@ -788,6 +871,30 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
             </div>
           </div>
         )}
+
+        {/* Pulsing SOS Direct Call 112 button */}
+        <a
+          href="tel:112"
+          className="glass-panel rounded-xl p-4 border-2 border-rose-500/80 hover:border-rose-400 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 font-mono text-center flex flex-col items-center justify-center gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(239,68,68,0.25)] hover:shadow-[0_0_25px_rgba(239,68,68,0.45)] group animate-pulse-slow shrink-0"
+        >
+          <div className="relative">
+            <div className="absolute inset-0 bg-rose-500 rounded-full blur opacity-45 group-hover:opacity-75 transition-opacity animate-ping"></div>
+            <div className="relative p-3 bg-rose-500 rounded-full border border-rose-400 text-slate-950">
+              <ShieldAlert className="w-5.5 h-5.5 animate-pulse" />
+            </div>
+          </div>
+          <div className="space-y-0.5 mt-1">
+            <span className="text-[10px] font-black uppercase tracking-wider block text-rose-400">
+              SOS EMERGENCY DIRECT DIAL
+            </span>
+            <span className="text-[13px] font-black text-rose-100 font-mono tracking-widest block">
+              CALL 112
+            </span>
+          </div>
+          <span className="text-[8px] text-slate-500 font-bold uppercase block border-t border-slate-900/60 pt-1.5 w-full">
+            Single-click to connect National Control Room
+          </span>
+        </a>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-export type DisasterType = 'cloudburst' | 'landslide' | 'flood';
+export type DisasterType = 'cloudburst' | 'landslide' | 'flood' | 'earthquake' | 'wildfire' | 'tsunami' | 'gasleak' | 'hailstorm';
 export type IntensityLevel = 'low' | 'medium' | 'severe';
 export type LocationId = 'wayanad' | 'joshimath' | 'chennai';
 export type RoleType = 'dma' | 'responder' | 'shelter';
