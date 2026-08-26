@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, Bell, Activity, Wifi, Database, Radio } from 'lucide-react';
-import { RoleType } from '../types';
+import { Shield, Users, Wifi, Database, Radio, Lock, Unlock, KeyRound, X } from 'lucide-react';
+import { RoleType, WeatherData, LocationId } from '../types';
 
 interface HeaderProps {
   activeRole: RoleType;
   setActiveRole: (role: RoleType) => void;
   systemAlert: boolean;
   alertMessage: string | null;
+  weather: WeatherData;
+  locationId: LocationId;
+  isOfficialAuthenticated: boolean;
+  authenticateOfficial: (pin: string) => boolean;
+  logoutOfficial: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -14,9 +19,16 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveRole,
   systemAlert,
   alertMessage,
+  weather,
+  locationId,
+  isOfficialAuthenticated,
+  authenticateOfficial,
+  logoutOfficial,
 }) => {
   const [time, setTime] = useState<string>('');
   const [tickerOffset, setTickerOffset] = useState<number>(0);
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [pinInput, setPinInput] = useState<string>('');
 
   useEffect(() => {
     const updateTime = () => {
@@ -46,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   useEffect(() => {
     const interval = setInterval(() => {
       setTickerOffset((prev) => (prev + 1) % 100);
-    }, 3000);
+    }, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -55,6 +67,15 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'responder', label: 'Field Responder / Engineer' },
     { id: 'shelter', label: 'Resettlement Shelter Coordinator' },
   ];
+
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const success = authenticateOfficial(pinInput);
+    if (success) {
+      setShowLoginModal(false);
+      setPinInput('');
+    }
+  };
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
@@ -66,8 +87,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="font-mono tracking-wide text-rose-400">CRITICAL LIVE THREAT EVENT ACTIVE:</span>
             <span>{alertMessage}</span>
           </div>
-          <span className="text-[10px] bg-rose-900/60 px-2 py-0.5 rounded border border-rose-500/30 font-mono">
-            RESPONSES DISPATCHED
+          <span className="text-[10px] bg-rose-900/60 px-2 py-0.5 rounded border border-rose-500/30 font-mono flex items-center gap-1.5">
+            IMD ALERT: <span className="text-rose-400 font-extrabold uppercase">{weather.imdAlertLevel}</span>
           </span>
         </div>
       )}
@@ -105,17 +126,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <>
                   <span>[ISRO BHUVAN] GIS Feed Sync: OK</span>
                   <span>•</span>
-                  <span>[AWS-EAST] DB Ping: 12ms</span>
+                  <span>[IMD-WEATHER] Alert Level: {weather.imdAlertLevel.toUpperCase()}</span>
                   <span>•</span>
-                  <span>[IOT-NODE-W4] Rain Gauge: 4.8mm/hr</span>
+                  <span>[PRECIP-FEED] Rain: {weather.precipitation} mm/h</span>
                 </>
               ) : (
                 <>
-                  <span>[SAT-CONN-2] Signal strength: 98%</span>
+                  <span>[SAT-CONN] {locationId.toUpperCase()} satellite grid sync: OK</span>
                   <span>•</span>
-                  <span>[AI-ENGINE] CV Models loaded</span>
+                  <span>[AI-SOLVER] Obstacle avoidance route optimization running</span>
                   <span>•</span>
-                  <span>[SYS-LOG] Evacuation solver active</span>
+                  <span>[SYS-LOG] Detour calculations armed</span>
                 </>
               )}
             </div>
@@ -126,8 +147,31 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Role Selector & Clock */}
-        <div className="flex items-center gap-4">
+        {/* Right: Authentication, Role Selector & Clock */}
+        <div className="flex items-center gap-4 relative">
+          
+          {/* Command Lock Toggle Button */}
+          {isOfficialAuthenticated ? (
+            <button
+              onClick={logoutOfficial}
+              className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-emerald-500 bg-emerald-950/20 text-emerald-400 text-xs font-bold font-mono hover:bg-emerald-950/40 transition-colors shadow-[0_0_10px_rgba(16,185,129,0.1)] cursor-pointer"
+              title="Official Access Active. Click to lock."
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>COMMAND LOCK OPEN</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-rose-600 bg-rose-950/20 text-rose-400 text-xs font-bold font-mono hover:bg-rose-950/40 transition-colors cursor-pointer"
+              title="Access restricted. Click to authenticate."
+            >
+              <Lock className="w-3.5 h-3.5 animate-pulse" />
+              <span>COMMAND LOCK</span>
+            </button>
+          )}
+
+          {/* Role selector dropdown */}
           <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-850 px-3 py-1.5 rounded-lg">
             <Users className="w-4 h-4 text-cyan-400" />
             <select
@@ -151,6 +195,49 @@ export const Header: React.FC<HeaderProps> = ({
               {time.split('|')[1] || '---'}
             </span>
           </div>
+
+          {/* Passcode Authentication Modal (Overlay Popup) */}
+          {showLoginModal && (
+            <div className="absolute top-12 right-0 w-64 bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-2xl z-[100] flex flex-col gap-3 font-mono">
+              <div className="flex items-center justify-between border-b border-slate-900 pb-2">
+                <span className="text-[10px] text-slate-200 font-bold flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5 text-rose-400" />
+                  OFFICIAL SIGN-IN
+                </span>
+                <button
+                  onClick={() => setShowLoginModal(false)}
+                  className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleLoginSubmit} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] text-slate-500 font-bold uppercase block">
+                    Security Passcode
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter PIN (SIH2026)"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-850 rounded p-1.5 text-xs text-slate-200 placeholder-slate-650 focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full py-1.5 rounded bg-rose-500 hover:bg-rose-600 text-slate-950 font-extrabold text-[10px] uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Verify Command
+                </button>
+              </form>
+              <div className="text-[8px] text-slate-500 text-center leading-relaxed">
+                Unlock to register emergency shelters and provision responder units.
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

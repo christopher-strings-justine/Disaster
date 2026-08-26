@@ -1,6 +1,6 @@
 export type DisasterType = 'cloudburst' | 'landslide' | 'flood';
 export type IntensityLevel = 'low' | 'medium' | 'severe';
-export type LocationId = 'wayanad' | 'joshimath';
+export type LocationId = 'wayanad' | 'joshimath' | 'chennai';
 export type RoleType = 'dma' | 'responder' | 'shelter';
 
 export interface HazardMarker {
@@ -11,8 +11,11 @@ export interface HazardMarker {
   status: 'danger' | 'warning' | 'safe';
   details: string;
   population: number;
-  x: number; // percentage coordinate (0-100) on SVG map
-  y: number; // percentage coordinate (0-100) on SVG map
+  lat: number; // real-world latitude
+  lng: number; // real-world longitude
+  radius?: number; // individual severity radius in meters (optional)
+  x?: number; // legacy SVG canvas x (0-100), optional
+  y?: number; // legacy SVG canvas y (0-100), optional
 }
 
 export interface Shelter {
@@ -24,6 +27,8 @@ export interface Shelter {
   waterLevel: number; // percentage (0-100)
   rations: number; // percentage (0-100)
   medicalKits: number; // percentage (0-100)
+  lat?: number; // real-world latitude (optional)
+  lng?: number; // real-world longitude (optional)
 }
 
 export interface FieldResponder {
@@ -67,3 +72,28 @@ export interface CvPresetImage {
   locationTag: string;
   boundingBoxes: BoundingBox[];
 }
+
+export interface WeatherData {
+  precipitation: number; // mm/hr
+  temperature: number; // °C
+  humidity: number; // %
+  windSpeed: number; // km/h
+  imdAlertLevel: 'green' | 'yellow' | 'orange' | 'red';
+}
+
+export interface Announcement {
+  id: string;
+  time: string;
+  source: string;
+  message: string;
+}
+
+export interface UserGpsData {
+  x: number;
+  y: number;
+  lat: number;
+  lng: number;
+  accuracy: number;
+}
+
+

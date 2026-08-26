@@ -16,7 +16,17 @@ import {
   Navigation,
   FileSpreadsheet
 } from 'lucide-react';
-import { RoleType, HazardMarker, Shelter, FieldResponder, WorkOrder } from '../types';
+import { RoleType, HazardMarker, Shelter, FieldResponder, WorkOrder, UserGpsData } from '../types';
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 interface TabRoleViewsProps {
   activeRole: RoleType;
@@ -28,6 +38,7 @@ interface TabRoleViewsProps {
   locationId: string;
   authorizeRelocation: (markerId: string) => void;
   updatePipelineStep: (step: number) => void;
+  userGps: UserGpsData | null;
 }
 
 export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
@@ -40,6 +51,7 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
   locationId,
   authorizeRelocation,
   updatePipelineStep,
+  userGps,
 }) => {
   // Filter data for active location
   const activeMarkers = markers.filter((m) => m.locationId === locationId);
@@ -113,17 +125,24 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-5 h-5 text-rose-500" />
                 <div>
-                  <h3 className="text-sm font-extrabold tracking-wider text-slate-100 uppercase">
+                  <h3 className="text-sm font-extrabold tracking-wider text-slate-100 uppercase flex items-center gap-2">
                     RISK-BASED PRIORITIZATION ENGINE
+                    {userGps && (
+                      <span className="text-[8px] bg-blue-950 text-blue-400 border border-blue-900/60 px-2 py-0.5 rounded font-mono uppercase animate-pulse">
+                        GPS Prioritization Active
+                      </span>
+                    )}
                   </h3>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    Heuristic assessment of habitations sorted by hazard susceptibility index
+                    {userGps 
+                      ? 'Habitations sorted by proximity to responder current GPS coordinates (Closest First)' 
+                      : 'Heuristic assessment of habitations sorted by default hazard susceptibility index'}
                   </p>
                 </div>
               </div>
               <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-400 font-mono uppercase tracking-wider rounded flex items-center gap-1.5 self-start sm:self-auto">
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                Live Heuristics
+                {userGps ? 'GPS Proximity Feeds' : 'Susceptibility Feeds'}
               </span>
             </div>
 
@@ -134,53 +153,69 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
                     <th className="py-2.5 px-3">Habitation</th>
                     <th className="py-2.5 px-3 text-center">Hazard Index</th>
                     <th className="py-2.5 px-3 text-center">Population</th>
+                    <th className="py-2.5 px-3 text-center">Proximity to GPS</th>
                     <th className="py-2.5 px-3">Geotech Vulnerability Description</th>
                     <th className="py-2.5 px-3 text-right">Relocation Authority</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
-                  {activeMarkers
-                    .filter((m) => m.status !== 'safe')
-                    .sort((a, b) => b.risk - a.risk)
-                    .map((marker) => (
-                      <tr key={marker.id} className="hover:bg-slate-900/30 transition-colors">
-                        <td className="py-3 px-3 font-semibold text-slate-200">{marker.name}</td>
-                        <td className="py-3 px-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded font-bold ${
-                              marker.status === 'danger'
-                                ? 'bg-rose-950/60 text-rose-400 border border-rose-900/40'
-                                : 'bg-amber-950/60 text-amber-400 border border-amber-900/40'
-                            }`}
-                          >
-                            {marker.risk}%
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-center text-slate-300">
-                          {marker.population.toLocaleString('en-IN')}
-                        </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate" title={marker.details}>
-                          {marker.details}
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              authorizeRelocation(marker.id);
-                              // Set active step to 7 (RELOCATE)
-                              updatePipelineStep(7);
-                            }}
-                            className={`py-1 px-3 rounded font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer ${
-                              marker.risk > 80
-                                ? 'bg-rose-500 hover:bg-rose-600 text-slate-950'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                            }`}
-                          >
-                            Authorize Relocate
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                  {[...activeMarkers.filter((m) => m.status !== 'safe')]
+                    .sort((a, b) => {
+                      if (userGps) {
+                        const distA = haversineKm(a.lat, a.lng, userGps.lat, userGps.lng);
+                        const distB = haversineKm(b.lat, b.lng, userGps.lat, userGps.lng);
+                        return distA - distB;
+                      }
+                      return b.risk - a.risk;
+                    })
+                    .map((marker) => {
+                      const gpsDist = userGps
+                        ? haversineKm(marker.lat, marker.lng, userGps.lat, userGps.lng).toFixed(1) + ' km'
+                        : 'GPS Offline';
+                      return (
+                        <tr key={marker.id} className="hover:bg-slate-900/30 transition-colors">
+                          <td className="py-3 px-3 font-semibold text-slate-200">{marker.name}</td>
+                          <td className="py-3 px-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold ${
+                                marker.status === 'danger'
+                                  ? 'bg-rose-950/60 text-rose-400 border border-rose-900/40'
+                                  : 'bg-amber-950/60 text-amber-400 border border-amber-900/40'
+                              }`}
+                            >
+                              {marker.risk}%
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center text-slate-300">
+                            {marker.population.toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-center text-slate-300">
+                            <span className={userGps ? 'text-blue-400 font-bold' : 'text-slate-500'}>
+                              {gpsDist}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-400 max-w-xs truncate" title={marker.details}>
+                            {marker.details}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                authorizeRelocation(marker.id);
+                                updatePipelineStep(7);
+                              }}
+                              className={`py-1 px-3 rounded font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer ${
+                                marker.risk > 80
+                                  ? 'bg-rose-500 hover:bg-rose-600 text-slate-950'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              }`}
+                            >
+                              Authorize Relocate
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -417,18 +452,32 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
             <div className="space-y-6">
               {activeShelters.map((shelter) => {
                 const occupancyRate = Math.round((shelter.occupancy / shelter.capacity) * 100);
+                const check = isShelterCompromised(shelter.lat ?? 0, shelter.lng ?? 0, markers);
 
                 return (
                   <div
                     key={shelter.id}
-                    className="p-4 bg-slate-950/80 border border-slate-900 rounded-xl space-y-4"
+                    className={`p-4 rounded-xl space-y-4 border ${
+                      check.compromised 
+                        ? 'bg-rose-950/20 border-rose-500/40' 
+                        : 'bg-slate-950/80 border-slate-900'
+                    }`}
                   >
                     {/* Shelter Header Capacity Gauge */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-900 pb-3">
                       <div>
-                        <h4 className="text-sm font-bold text-slate-200">{shelter.name}</h4>
-                        <span className="text-[9px] text-slate-500 font-mono">
-                          LOCATION: {shelter.locationId.toUpperCase()} SAFETY GRID
+                        <h4 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+                          {shelter.name}
+                          {check.compromised && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500 text-slate-950 text-[8px] font-black uppercase animate-pulse">
+                              Compromised
+                            </span>
+                          )}
+                        </h4>
+                        <span className="text-[9px] font-mono block">
+                          {check.compromised 
+                            ? `⚠️ ALERT: Proximity overlap with active threat: ${check.threatName}`
+                            : `LOCATION: ${shelter.locationId.toUpperCase()} SAFETY GRID`}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -529,4 +578,30 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
       return null;
   }
 };
+
+// ─── Haversine distance (meters) ─────────────────────────────────────────────
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Check if a safe shelter falls inside any active threat's severity range
+function isShelterCompromised(shelterLat: number, shelterLng: number, allMarkers: HazardMarker[]): { compromised: boolean; threatName?: string } {
+  for (const m of allMarkers) {
+    if (m.status !== 'safe' && m.risk > 10) {
+      const radiusMeters = m.radius || 1000;
+      const distanceMeters = haversineMeters(m.lat, m.lng, shelterLat, shelterLng);
+      if (distanceMeters <= radiusMeters) {
+        return { compromised: true, threatName: m.name };
+      }
+    }
+  }
+  return { compromised: false };
+}
+
 export default TabRoleViews;

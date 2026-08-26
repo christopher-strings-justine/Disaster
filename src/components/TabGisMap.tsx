@@ -1,360 +1,624 @@
-import React, { useState, useEffect } from 'react';
-import { MapPin, Info, Navigation, ArrowRight, Eye, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { HazardMarker, LocationId, Shelter } from '../types';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, CircleMarker, Circle, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import {
+  Info, Navigation, ArrowRight, ShieldAlert, CloudRain, Check,
+  Layers, ExternalLink, Crosshair, AlertTriangle, MapPin
+} from 'lucide-react';
+import { HazardMarker, LocationId, WeatherData, UserGpsData } from '../types';
 
+// Fix Leaflet default icon paths (broken in Vite/webpack builds)
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+// ─── Location centre coords ─────────────────────────────────────────────────
+const LOCATION_CENTRES: Record<LocationId, [number, number]> = {
+  chennai:   [12.9762,  80.2181],
+  wayanad:   [11.5755,  76.0533],
+  joshimath: [30.5618,  79.5643],
+};
+const LOCATION_ZOOM: Record<LocationId, number> = {
+  chennai:   13,
+  wayanad:   14,
+  joshimath: 14,
+};
+
+// ─── Custom SVG Icons ────────────────────────────────────────────────────────
+const makeIcon = (color: string, pulse: boolean) =>
+  L.divIcon({
+    className: '',
+    html: `<div style="
+      width:22px;height:22px;border-radius:50%;
+      background:${color};border:3px solid #fff;
+      box-shadow:0 0 0 3px ${color}55, 0 2px 8px rgba(0,0,0,0.4);
+      ${pulse ? 'animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;' : ''}
+    "></div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -14],
+  });
+
+const DANGER_ICON  = makeIcon('#ef4444', true);
+const WARNING_ICON = makeIcon('#f59e0b', false);
+const SAFE_ICON    = makeIcon('#10b981', false);
+const COMPROMISED_ICON = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:22px;height:22px;border-radius:50%;
+    background:#1e293b;border:3px solid #ef4444;
+    box-shadow:0 0 0 3px #ef444455, 0 2px 8px rgba(0,0,0,0.4);
+    display:flex;align-items:center;justify-content:center;
+  ">
+    <span style="color:#ef4444;font-size:10px;font-weight:black;line-height:1;margin-bottom:1px">⚠️</span>
+  </div>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+  popupAnchor: [0, -14],
+});
+const GPS_ICON = L.divIcon({
+  className: '',
+  html: `
+    <style>
+      @keyframes gpsPulse {
+        0% { transform: scale(0.8); opacity: 1; }
+        100% { transform: scale(2.2); opacity: 0; }
+      }
+    </style>
+    <div style="
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #1a73e8;
+      border: 2px solid #ffffff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      position: relative;
+    ">
+      <div style="
+        position: absolute;
+        top: -5px; left: -5px; right: -5px; bottom: -5px;
+        border-radius: 50%;
+        background: rgba(26,115,232,0.35);
+        animation: gpsPulse 2s infinite ease-out;
+        pointer-events: none;
+      "></div>
+    </div>
+  `,
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+// ─── Sub-component: fly to location when locationId changes ──────────────────
+function MapFlyTo({ centre, zoom }: { centre: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo(centre, zoom, { duration: 1.4 });
+  }, [centre, zoom, map]);
+  return null;
+}
+
+
+
+// ─── Props ───────────────────────────────────────────────────────────────────
 interface TabGisMapProps {
   locationId: LocationId;
   markers: HazardMarker[];
-  shelters: Shelter[];
   selectedMarker: HazardMarker | null;
-  setSelectedMarker: (marker: HazardMarker | null) => void;
+  setSelectedMarker: (m: HazardMarker | null) => void;
   activeEvacuationRoute: {
-    path: string;
+    routeCoords: [number, number][];
     distance: string;
     time: string;
     roadCondition: string;
     targetShelterName: string;
+    isRerouted: boolean;
+    targetShelter: HazardMarker | null;
   } | null;
-  setActiveEvacuationRoute: (
-    route: {
-      path: string;
-      distance: string;
-      time: string;
-      roadCondition: string;
-      targetShelterName: string;
-    } | null
-  ) => void;
+  setActiveEvacuationRoute: (r: any) => void;
   updatePipelineStep: (step: number) => void;
+  weather: WeatherData;
+  userGps: UserGpsData | null;
+  setUserGps: (g: UserGpsData | null) => void;
+  severityRadius: number;
+  isOfficialAuthenticated: boolean;
+  registerCustomMarker: (marker: HazardMarker) => void;
 }
 
+// ─── Main Component ──────────────────────────────────────────────────────────
 export const TabGisMap: React.FC<TabGisMapProps> = ({
   locationId,
   markers,
-  shelters,
   selectedMarker,
   setSelectedMarker,
   activeEvacuationRoute,
   setActiveEvacuationRoute,
   updatePipelineStep,
+  weather,
+  userGps,
+  setUserGps,
+  severityRadius,
+  isOfficialAuthenticated,
+  registerCustomMarker,
 }) => {
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [mapStyle, setMapStyle] = useState<'street' | 'satellite'>('street');
 
-  // Filter markers and shelters based on active location
-  const activeMarkers = markers.filter((m) => m.locationId === locationId);
-  const activeShelters = shelters.filter((s) => s.locationId === locationId);
+  // Custom live coordinate plotting states
+  const [clickedLatLng, setClickedLatLng] = useState<{ lat: number; lng: number } | null>(null);
+  const [plotType, setPlotType] = useState<'hazard' | 'shelter'>('hazard');
+  const [plotName, setPlotName] = useState('Active Landslide / Flooding');
+  const [plotRadius, setPlotRadius] = useState(1000);
+  const [plotRisk, setPlotRisk] = useState(80);
 
-  // Auto-calculate routing when selectedMarker changes
-  useEffect(() => {
-    if (selectedMarker && selectedMarker.status !== 'safe') {
-      // Find nearest safe shelter for this location
-      const safeNodes = activeMarkers.filter((m) => m.status === 'safe');
-      if (safeNodes.length > 0) {
-        // Find nearest safe shelter (just pick first for mock logic or compute Euclidean distance)
-        const nearestShelter = safeNodes[0];
-
-        // Draw curved Bezier path
-        const x1 = selectedMarker.x;
-        const y1 = selectedMarker.y;
-        const x2 = nearestShelter.x;
-        const y2 = nearestShelter.y;
-
-        // Quadratic Bezier curve: M startX startY Q controlX controlY endX endY
-        // Control point is average point offset orthogonally for a nice curve
-        const cx = (x1 + x2) / 2 - 8;
-        const cy = (y1 + y2) / 2 - 12;
-
-        const pathStr = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
-
-        // Simulate distances
-        const distNum = Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2)) * 0.15;
-        const distStr = `${distNum.toFixed(1)} km`;
-        const timeVal = Math.round(distNum * 3);
-        const timeStr = `${timeVal} mins`;
-        const roadCond = selectedMarker.risk > 80 ? 'Heavy Rain / Rocks Cleared' : 'Cleared';
-
-        setActiveEvacuationRoute({
-          path: pathStr,
-          distance: distStr,
-          time: timeStr,
-          roadCondition: roadCond,
-          targetShelterName: nearestShelter.name,
-        });
-
-        // Set active pipeline step to 5: ROUTE
-        updatePipelineStep(5);
+  // Map Click Listener child component
+  const MapClickHandler = () => {
+    useMapEvents({
+      click(e) {
+        setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
+        // Set context-aware defaults when opening plot form
+        if (isOfficialAuthenticated) {
+          setPlotName(plotType === 'shelter' ? 'GCC Resettlement Safe Camp' : 'Active Landslide / Flooding');
+        }
       }
-    } else {
+    });
+    return null;
+  };
+  const activeMarkers = markers.filter(m => m.locationId === locationId);
+  const centre = LOCATION_CENTRES[locationId];
+  const zoom   = LOCATION_ZOOM[locationId];
+
+  // ── OSRM route fetch ────────────────────────────────────────────────────
+  const fetchRoute = useCallback(async (from: HazardMarker, to: HazardMarker) => {
+    setRouteLoading(true);
+    setRouteError(null);
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/` +
+        `${from.lng},${from.lat};${to.lng},${to.lat}` +
+        `?overview=full&geometries=geojson`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes?.length) {
+        const route = data.routes[0];
+        const coords: [number, number][] = route.geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng]
+        );
+        const distKm = (route.distance / 1000).toFixed(1);
+        const timeMins = Math.round(route.duration / 60);
+        setActiveEvacuationRoute({
+          routeCoords: coords,
+          distance: `${distKm} km`,
+          time: `${timeMins} mins`,
+          roadCondition:
+            from.risk > 80
+              ? 'Heavy Rainfall — Proceed with caution'
+              : 'Route appears clear',
+          targetShelterName: to.name,
+          isRerouted: false,
+          targetShelter: to,
+        });
+      } else {
+        // Fallback: straight line
+        setActiveEvacuationRoute({
+          routeCoords: [[from.lat, from.lng], [to.lat, to.lng]],
+          distance: `~${haversine(from.lat, from.lng, to.lat, to.lng).toFixed(1)} km`,
+          time: 'Est. unknown',
+          roadCondition: 'Route data unavailable — showing straight line',
+          targetShelterName: to.name,
+          isRerouted: true,
+          targetShelter: to,
+        });
+        setRouteError('OSRM could not compute road route — showing straight line fallback.');
+      }
+    } catch {
+      setRouteError('Network error — check your connection.');
       setActiveEvacuationRoute(null);
     }
-  }, [selectedMarker, locationId]);
+    setRouteLoading(false);
+    updatePipelineStep(5);
+  }, [setActiveEvacuationRoute, updatePipelineStep]);
+
+  // ── Find nearest safe shelter and trigger route ─────────────────────────
+  useEffect(() => {
+    if (!selectedMarker || selectedMarker.status === 'safe') {
+      setActiveEvacuationRoute(null);
+      return;
+    }
+    const safeNodes = activeMarkers.filter(m => m.status === 'safe');
+    if (!safeNodes.length) return;
+
+    // Filter out compromised safe nodes (shelters within range of active threat)
+    const uncompromisedSafeNodes = safeNodes.filter(s => {
+      const check = isShelterCompromised(s.lat, s.lng, markers);
+      return !check.compromised;
+    });
+
+    if (!uncompromisedSafeNodes.length) {
+      setRouteError('WARNING: All regional safe shelters are compromised! Proximity ranges overlap all camps.');
+      setActiveEvacuationRoute(null);
+      return;
+    }
+
+    let nearest = uncompromisedSafeNodes[0];
+    let minDist = Infinity;
+    uncompromisedSafeNodes.forEach(s => {
+      const d = haversine(selectedMarker.lat, selectedMarker.lng, s.lat, s.lng);
+      if (d < minDist) { minDist = d; nearest = s; }
+    });
+    fetchRoute(selectedMarker, nearest);
+  }, [selectedMarker, locationId, markers]);
+
+  // ── GPS geolocation ─────────────────────────────────────────────────────
+  const triggerGps = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setUserGps({ lat, lng, x: 0, y: 0, accuracy: pos.coords.accuracy });
+          if (mapRef.current) {
+            mapRef.current.flyTo([lat, lng], 15, { duration: 1.2 });
+          }
+        },
+        () => mockGps(),
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    } else mockGps();
+  };
+  const mockGps = () => {
+    const defaults: Record<LocationId, [number, number]> = {
+      chennai:   [12.9620, 80.2250],
+      wayanad:   [11.5824, 76.1215],
+      joshimath: [30.5518, 79.5635],
+    };
+    const [lat, lng] = defaults[locationId];
+    setUserGps({ lat, lng, x: 0, y: 0, accuracy: 12 });
+    if (mapRef.current) {
+      mapRef.current.flyTo([lat, lng], 15, { duration: 1.2 });
+    }
+  };
+
+  // ── Open Google Maps for navigation ────────────────────────────────────
+  const openGoogleMaps = () => {
+    if (!selectedMarker || !activeEvacuationRoute?.targetShelter) return;
+    const { lat: lat1, lng: lng1 } = selectedMarker;
+    const { lat: lat2, lng: lng2 } = activeEvacuationRoute.targetShelter;
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=driving`,
+      '_blank'
+    );
+  };
+
+  const tileUrl = mapStyle === 'satellite'
+    ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+    : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const tileAttr = mapStyle === 'satellite'
+    ? '© Esri &mdash; Source: Esri, USGS, NOAA'
+    : '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 h-full">
-      {/* Map Pane */}
-      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[500px] relative overflow-hidden">
-        {/* Background Radar sweeps */}
-        <div className="tech-grid absolute inset-0 opacity-5 pointer-events-none"></div>
-
-        {/* Map Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 relative z-10">
+      {/* ── MAP PANE ─────────────────────────────────────────────────────── */}
+      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[560px]">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <div>
               <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                {locationId === 'wayanad' ? 'Wayanad Hills (Kerala) Sector Map' : 'Joshimath Valley (Uttarakhand) Hazard Map'}
+                {locationId === 'chennai' ? 'CHENNAI METROPOLITAN REGION' :
+                 locationId === 'wayanad' ? 'WAYANAD DISTRICT' : 'JOSHIMATH VALLEY'}
+                {' '}— LIVE MAP
               </h2>
               <p className="text-[10px] text-slate-400 font-mono">
-                Satellite Raster Grid • Scale 1:25,000 • Live Sensor Overlays
+                Real street map • OpenStreetMap • Click any marker to route
               </p>
             </div>
           </div>
-          <span className="text-[10px] bg-slate-900 border border-slate-800 px-2 py-0.5 rounded font-mono text-cyan-400">
-            ISRO-BHUVAN ENGINE
+          <div className="flex items-center gap-2">
+            {/* Map style toggle */}
+            <button
+              onClick={() => setMapStyle(s => s === 'street' ? 'satellite' : 'street')}
+              className="flex items-center gap-1.5 text-[10px] font-mono bg-slate-900 border border-slate-700 hover:border-cyan-500 text-slate-300 hover:text-cyan-400 px-2.5 py-1.5 rounded transition-all"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              {mapStyle === 'street' ? 'Satellite' : 'Street'}
+            </button>
+            {/* GPS button */}
+            <button
+              onClick={triggerGps}
+              className={`flex items-center gap-1.5 text-[10px] font-mono border px-2.5 py-1.5 rounded transition-all ${
+                userGps
+                  ? 'bg-blue-950/40 border-blue-500 text-blue-400'
+                  : 'bg-slate-900 border-slate-700 hover:border-blue-500 text-slate-300 hover:text-blue-400'
+              }`}
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              {userGps ? 'GPS Active' : 'Locate Me'}
+            </button>
+          </div>
+        </div>
+
+        {/* Weather HUD strip */}
+        <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400 mb-3 px-1">
+          <span className="flex items-center gap-1">
+            <CloudRain className="w-3 h-3 text-cyan-400" />
+            {weather.precipitation} mm/h
+          </span>
+          <span>{weather.windSpeed} km/h wind</span>
+          <span>{weather.temperature}°C</span>
+          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+            weather.imdAlertLevel === 'red'    ? 'bg-rose-950 text-rose-400' :
+            weather.imdAlertLevel === 'orange' ? 'bg-amber-950 text-amber-400' :
+            weather.imdAlertLevel === 'yellow' ? 'bg-yellow-950 text-yellow-400' :
+            'bg-emerald-950 text-emerald-400'
+          }`}>
+            IMD {weather.imdAlertLevel} Alert
           </span>
         </div>
 
-        {/* Interactive SVG Canvas */}
-        <div className="flex-1 bg-slate-950/70 border border-slate-850 rounded-lg relative overflow-hidden flex items-center justify-center p-2">
-          {/* Topographical Grid Simulation inside SVG */}
-          <svg
-            viewBox="0 0 100 100"
-            className="w-full h-full max-h-[600px] aspect-[4/3] select-none cursor-crosshair"
+        {/* ── Leaflet Map ──────────────────────────────────────────────── */}
+        <div className="flex-1 rounded-lg overflow-hidden border border-slate-700 min-h-[420px]" style={{ zIndex: 0 }}>
+          <MapContainer
+            ref={mapRef}
+            center={centre}
+            zoom={zoom}
+            style={{ height: '100%', width: '100%', minHeight: '420px' }}
+            scrollWheelZoom
+            className="z-0"
           >
-            {/* Topography Contours */}
-            <path
-              d="M 5,20 C 15,10 40,5 60,15 C 80,25 90,50 85,75 C 80,90 65,95 50,90 C 30,85 10,70 5,20 Z"
-              fill="none"
-              stroke="#1e293b"
-              strokeWidth="0.5"
-              strokeDasharray="2,2"
-            />
-            <path
-              d="M 12,28 C 22,18 42,15 58,22 C 74,29 82,48 78,70 C 74,82 62,86 48,82 C 32,78 16,66 12,28 Z"
-              fill="none"
-              stroke="#1e293b"
-              strokeWidth="0.75"
-            />
-            <path
-              d="M 22,38 C 30,30 45,28 55,32 C 65,36 70,48 68,62 C 66,70 58,74 48,72 C 38,70 25,60 22,38 Z"
-              fill="none"
-              stroke="#334155"
-              strokeWidth="0.5"
-              strokeDasharray="3,3"
-            />
+            <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
+            <MapFlyTo centre={centre} zoom={zoom} />
 
-            {/* Mountains Topo Ridges */}
-            <path d="M 5 50 L 25 30 L 45 42 L 70 20 L 95 45" fill="none" stroke="#0f172a" strokeWidth="2" />
-            <path d="M 10 75 L 30 55 L 50 65 L 75 45 L 90 60" fill="none" stroke="#0f172a" strokeWidth="1.5" />
-
-            {/* Waterways / Rivers (Blue/Cyan paths) */}
-            <path
-              d="M 0,5 C 20,10 32,25 35,45 C 38,65 52,80 70,85 C 85,90 92,100 100,100"
-              fill="none"
-              stroke="#0c4a6e"
-              strokeWidth="1.5"
-              className="opacity-70"
-            />
-            <path
-              d="M 0,5 C 20,10 32,25 35,45 C 38,65 52,80 70,85 C 85,90 92,100 100,100"
-              fill="none"
-              stroke="#0ea5e9"
-              strokeWidth="0.5"
-              className="opacity-40"
-            />
-
-            {/* Road Networks (Dotted paths) */}
-            <path
-              d="M 15,15 L 20,35 L 35,65 L 45,50 L 60,70 Q 75,75 90,60"
-              fill="none"
-              stroke="#334155"
-              strokeWidth="1"
-              strokeDasharray="2,3"
-            />
-            <path
-              d="M 15,15 L 20,20 L 30,55 L 48,62 Q 60,55 75,25"
-              fill="none"
-              stroke="#334155"
-              strokeWidth="1"
-              strokeDasharray="2,3"
-            />
-
-            {/* Evacuation Route Drawing */}
-            {activeEvacuationRoute && (
-              <>
-                {/* Glow Backdrop */}
-                <path
-                  d={activeEvacuationRoute.path}
-                  fill="none"
-                  stroke="#22d3ee"
-                  strokeWidth="4"
-                  className="opacity-20 blur-sm"
-                />
-                {/* Animated Dotted Flow */}
-                <path
-                  d={activeEvacuationRoute.path}
-                  fill="none"
-                  stroke="#06b6d4"
-                  strokeWidth="2"
-                  className="animate-dash"
-                />
-              </>
-            )}
-
-            {/* Zone Boundaries */}
-            {/* Wayanad Zones */}
-            {locationId === 'wayanad' && (
-              <>
-                {/* Danger zone around Mundakkai */}
-                <polygon
-                  points="28,58 42,56 42,75 25,72"
-                  fill="rgba(244, 63, 94, 0.08)"
-                  stroke="rgba(244, 63, 94, 0.4)"
-                  strokeWidth="0.5"
-                  strokeDasharray="2,1"
-                  className="animate-pulse"
-                />
-                {/* Warning zone around Chooralmala */}
-                <polygon
-                  points="38,42 55,40 50,58 35,55"
-                  fill="rgba(245, 158, 11, 0.05)"
-                  stroke="rgba(245, 158, 11, 0.3)"
-                  strokeWidth="0.5"
-                />
-              </>
-            )}
-
-            {/* Joshimath Zones */}
-            {locationId === 'joshimath' && (
-              <>
-                {/* Danger Zone around Sunil Ward */}
-                <polygon
-                  points="20,48 40,46 38,65 18,62"
-                  fill="rgba(244, 63, 94, 0.08)"
-                  stroke="rgba(244, 63, 94, 0.4)"
-                  strokeWidth="0.5"
-                  strokeDasharray="2,1"
-                  className="animate-pulse"
-                />
-                {/* Warning Zone Manohar Bagh */}
-                <polygon
-                  points="40,54 58,52 56,70 38,68"
-                  fill="rgba(245, 158, 11, 0.05)"
-                  stroke="rgba(245, 158, 11, 0.3)"
-                  strokeWidth="0.5"
-                />
-              </>
-            )}
-
-            {/* Node Markers */}
-            {activeMarkers.map((marker) => {
-              const isSelected = selectedMarker?.id === marker.id;
-              const isHovered = hoveredNode === marker.id;
-
-              // Color classes
-              let markerColor = '#10b981'; // safe
-              let markerGlow = 'rgba(16, 185, 129, 0.4)';
-              if (marker.status === 'danger') {
-                markerColor = '#f43f5e';
-                markerGlow = 'rgba(244, 63, 94, 0.6)';
-              } else if (marker.status === 'warning') {
-                markerColor = '#f59e0b';
-                markerGlow = 'rgba(245, 158, 11, 0.5)';
+            {/* Hazard & shelter markers */}
+            {activeMarkers.map(m => {
+              const check = isShelterCompromised(m.lat, m.lng, markers);
+              const isComp = m.status === 'safe' && check.compromised;
+              let icon = m.status === 'danger' ? DANGER_ICON : m.status === 'warning' ? WARNING_ICON : SAFE_ICON;
+              if (isComp) {
+                icon = COMPROMISED_ICON;
               }
-
               return (
-                <g
-                  key={marker.id}
-                  onClick={() => setSelectedMarker(isSelected ? null : marker)}
-                  onMouseEnter={() => setHoveredNode(marker.id)}
-                  onMouseLeave={() => setHoveredNode(null)}
-                  className="cursor-pointer"
+                <Marker
+                  key={m.id}
+                  position={[m.lat, m.lng]}
+                  icon={icon}
+                  eventHandlers={{
+                    click: () => setSelectedMarker(selectedMarker?.id === m.id ? null : m),
+                  }}
                 >
-                  {/* Outer Pulsing Glow */}
-                  {marker.status === 'danger' && (
-                    <circle
-                      cx={marker.x}
-                      cy={marker.y}
-                      r={isHovered || isSelected ? 4.5 : 3.5}
-                      fill="none"
-                      stroke={markerColor}
-                      strokeWidth="0.75"
-                      className="animate-ping"
-                      style={{ transformOrigin: `${marker.x}px ${marker.y}px` }}
-                    />
-                  )}
-
-                  {/* Node Circle */}
-                  <circle
-                    cx={marker.x}
-                    cy={marker.y}
-                    r={isSelected ? 3 : 2}
-                    fill={markerColor}
-                    stroke="#ffffff"
-                    strokeWidth={isSelected ? 0.75 : 0.4}
-                    className="transition-all duration-300"
-                  />
-
-                  {/* Inner center dot for safety marker */}
-                  {marker.status === 'safe' && (
-                    <circle cx={marker.x} cy={marker.y} r="0.75" fill="#020617" />
-                  )}
-
-                  {/* Label tooltip (rendered directly on hover/selected) */}
-                  {(isHovered || isSelected) && (
-                    <g style={{ pointerEvents: 'none' }}>
-                      <rect
-                        x={marker.x - 18}
-                        y={marker.y - 8.5}
-                        width="36"
-                        height="5.5"
-                        rx="1"
-                        fill="#0f172a"
-                        stroke={isSelected ? '#06b6d4' : '#475569'}
-                        strokeWidth="0.3"
-                      />
-                      <text
-                        x={marker.x}
-                        y={marker.y - 4.5}
-                        fill="#f1f5f9"
-                        fontSize="2.5"
-                        fontWeight="bold"
-                        textAnchor="middle"
-                        fontFamily="monospace"
-                      >
-                        {marker.name.split(' ')[0]}
-                      </text>
-                    </g>
-                  )}
-                </g>
+                  <Popup className="leaflet-popup-dark">
+                    <div className="p-1 min-w-[180px]">
+                      <div className={`text-xs font-bold mb-1 ${
+                        isComp ? 'text-red-400 font-extrabold line-through' :
+                        m.status === 'danger' ? 'text-red-500' :
+                        m.status === 'warning' ? 'text-amber-500' : 'text-emerald-500'
+                      }`}>{m.name} {isComp && '⚠️ (COMPROMISED)'}</div>
+                      <div className="text-[11px] text-gray-400 mb-1 leading-relaxed">
+                        {isComp ? `ALERT: Shelter is compromised due to proximity to active threat: ${check.threatName}. Immediate evacuation required.` : m.details}
+                      </div>
+                      <div className="text-[10px] text-gray-500">
+                        {m.status !== 'safe' && <span>👥 {m.population.toLocaleString()} residents · </span>}
+                        Risk: <span className="font-bold">{m.risk}%</span>
+                      </div>
+                      <div className="text-[9px] text-gray-500 mt-1 font-mono">
+                        {m.lat.toFixed(4)}°N, {m.lng.toFixed(4)}°E
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
               );
             })}
-          </svg>
+
+            {/* Custom Severity Radius circle overlay for active selected hazard */}
+            {selectedMarker && selectedMarker.status !== 'safe' && (
+              <Circle
+                center={[selectedMarker.lat, selectedMarker.lng]}
+                radius={selectedMarker.radius || 1000}
+                pathOptions={{
+                  color: selectedMarker.status === 'danger' ? '#ef4444' : '#f59e0b',
+                  fillColor: selectedMarker.status === 'danger' ? '#ef4444' : '#f59e0b',
+                  fillOpacity: 0.12,
+                  weight: 2,
+                  dashArray: '5,5'
+                }}
+              />
+            )}
+
+            {/* Real severity radius circles for all active danger/warning threats */}
+            {activeMarkers.filter(m => m.status !== 'safe' && m.risk > 10).map(m => (
+              <Circle
+                key={`threat-radius-${m.id}`}
+                center={[m.lat, m.lng]}
+                radius={m.radius || 1000}
+                pathOptions={{
+                  color: m.status === 'danger' ? '#ef4444' : '#f59e0b',
+                  fillColor: m.status === 'danger' ? '#ef4444' : '#f59e0b',
+                  fillOpacity: selectedMarker?.id === m.id ? 0.10 : 0.03,
+                  weight: selectedMarker?.id === m.id ? 2.5 : 1,
+                  dashArray: '4,4'
+                }}
+              />
+            ))}
+
+            {/* OSRM route polyline */}
+            {activeEvacuationRoute?.routeCoords && (
+              <>
+                {/* Glow outline */}
+                <Polyline
+                  positions={activeEvacuationRoute.routeCoords}
+                  pathOptions={{ color: '#3b82f6', weight: 8, opacity: 0.15 }}
+                />
+                {/* Main route */}
+                <Polyline
+                  positions={activeEvacuationRoute.routeCoords}
+                  pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.9, dashArray: activeEvacuationRoute.isRerouted ? '10,6' : undefined }}
+                />
+              </>
+            )}
+
+            {/* User GPS marker */}
+            {userGps && (
+              <>
+                <Circle
+                  center={[userGps.lat, userGps.lng]}
+                  radius={userGps.accuracy || 15}
+                  pathOptions={{
+                    color: '#1a73e8',
+                    fillColor: '#1a73e8',
+                    fillOpacity: 0.08,
+                    weight: 1,
+                    dashArray: '3,3'
+                  }}
+                />
+                <Marker position={[userGps.lat, userGps.lng]} icon={GPS_ICON}>
+                  <Popup>
+                    <div className="text-xs font-bold text-blue-600">📍 Your Location</div>
+                    <div className="text-[10px] text-gray-500 font-mono">{userGps.lat.toFixed(5)}, {userGps.lng.toFixed(5)}</div>
+                  </Popup>
+                </Marker>
+              </>
+            )}
+            {/* Map click listener to dynamically spawn threats/shelters */}
+            <MapClickHandler />
+
+            {clickedLatLng && (
+              <Popup
+                position={[clickedLatLng.lat, clickedLatLng.lng]}
+                eventHandlers={{ remove: () => setClickedLatLng(null) }}
+                className="leaflet-popup-dark animate-fade-in"
+              >
+                <div className="p-2 min-w-[220px] font-mono text-xs text-slate-200">
+                  <div className="font-bold text-slate-100 uppercase tracking-wider mb-2 text-[10px] border-b border-slate-800 pb-1.5 flex items-center justify-between">
+                    <span>📍 Plot GPS Point</span>
+                    <span className={`text-[8px] px-1 py-0.2 rounded border font-black ${
+                      isOfficialAuthenticated 
+                        ? "bg-emerald-950 text-emerald-400 border-emerald-800/40" 
+                        : "bg-rose-950 text-rose-400 border-rose-800/40"
+                    }`}>
+                      {isOfficialAuthenticated ? "Authorized" : "Locked"}
+                    </span>
+                  </div>
+
+                  {!isOfficialAuthenticated ? (
+                    <div className="text-[10px] text-rose-400 leading-relaxed py-1">
+                      ⚠️ ACCESS LOCKED: Authenticate as Higher Command Officer in the Demo Portal tab to enable live geospatial coordinate plotting.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-1.5 border-b border-slate-900 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => { setPlotType('hazard'); setPlotName('Active Landslide / Flooding'); }}
+                          className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
+                            plotType === 'hazard' ? 'bg-rose-500 text-slate-950 border-rose-400' : 'bg-slate-900 text-slate-450 border-slate-800'
+                          }`}
+                        >
+                          Threat
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setPlotType('shelter'); setPlotName('GCC Resettlement Safe Camp'); }}
+                          className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
+                            plotType === 'shelter' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-450 border-slate-800'
+                          }`}
+                        >
+                          Safe Haven
+                        </button>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[8px] text-slate-500 uppercase block">Label Name</label>
+                        <input
+                          type="text"
+                          value={plotName}
+                          onChange={(e) => setPlotName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none"
+                        />
+                      </div>
+
+                      {plotType === 'hazard' && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div className="space-y-1">
+                            <label className="text-[8px] text-slate-500 uppercase block">Radius (m)</label>
+                            <input
+                              type="number"
+                              value={plotRadius}
+                              onChange={(e) => setPlotRadius(Number(e.target.value))}
+                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none font-mono"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] text-slate-500 uppercase block">Risk %</label>
+                            <input
+                              type="number"
+                              value={plotRisk}
+                              onChange={(e) => setPlotRisk(Number(e.target.value))}
+                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const markerId = `${plotType}-custom-${Date.now()}`;
+                          const newMarker: HazardMarker = {
+                            id: markerId,
+                            name: plotName || (plotType === 'shelter' ? 'Safe Haven Camp' : 'Custom Threat'),
+                            locationId: locationId,
+                            risk: plotType === 'shelter' ? 2 : plotRisk,
+                            status: plotType === 'shelter' ? 'safe' : (plotRisk > 75 ? 'danger' : 'warning'),
+                            details: plotType === 'shelter' ? 'Live plotted government resettlement refuge camp.' : 'Live plotted geographical threat incident.',
+                            population: plotType === 'shelter' ? 0 : 250,
+                            lat: clickedLatLng.lat,
+                            lng: clickedLatLng.lng,
+                            radius: plotRadius,
+                          };
+                          registerCustomMarker(newMarker);
+                          setClickedLatLng(null);
+                        }}
+                        className="w-full py-1.5 mt-1 rounded bg-cyan-400 hover:bg-cyan-500 text-slate-950 font-black text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Confirm Placement
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Popup>
+            )}
+          </MapContainer>
         </div>
 
-        {/* Map Legend */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t border-slate-900 text-xs font-mono">
-          <div className="flex items-center gap-1.5 text-rose-400">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
-            <span>Red Zone (High Risk)</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-amber-400">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-505 shrink-0" style={{ backgroundColor: '#f59e0b' }}></span>
-            <span>Yellow Zone (Monitor)</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-emerald-400">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
-            <span>Safe Shelter Point</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-cyan-400">
-            <span className="w-4 h-0.5 border-t-2 border-dashed border-cyan-400 shrink-0 animate-pulse"></span>
-            <span>Opt. Evacuation Route</span>
-          </div>
+        {/* Legend */}
+        <div className="flex flex-wrap gap-4 mt-3 pt-3 border-t border-slate-900 text-xs font-mono">
+          <span className="flex items-center gap-1.5 text-rose-400">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />Danger Zone
+          </span>
+          <span className="flex items-center gap-1.5 text-amber-400">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />Warning Zone
+          </span>
+          <span className="flex items-center gap-1.5 text-emerald-400">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Safe Shelter
+          </span>
+          <span className="flex items-center gap-1.5 text-blue-400">
+            <span className="w-6 h-0.5 bg-blue-500 rounded" />OSRM Road Route
+          </span>
+          {userGps && (
+            <span className="flex items-center gap-1.5 text-blue-300">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-400 ring-2 ring-blue-300/40" />Your GPS
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Info Sidebar Pane */}
+      {/* ── EVACUATION SIDEBAR ───────────────────────────────────────────── */}
       <div className="w-full xl:w-96 flex flex-col gap-4">
-        {/* Evacuation Optimizer Card */}
         <div className="glass-panel rounded-xl p-5 border-t-4 border-t-cyan-500 shadow-xl flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <Navigation className="w-4.5 h-4.5 text-cyan-400" />
@@ -363,114 +627,192 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
             </h3>
           </div>
 
-          {activeEvacuationRoute && selectedMarker ? (
-            <div className="space-y-4">
+          {routeLoading && (
+            <div className="py-6 text-center">
+              <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-xs text-slate-400 font-mono">Computing OSRM road route…</p>
+            </div>
+          )}
+
+          {!routeLoading && activeEvacuationRoute && selectedMarker ? (
+            <div className="space-y-3 font-mono">
+              {/* Status banner */}
+              {activeEvacuationRoute.isRerouted ? (
+                <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-500/40 flex items-start gap-2 text-amber-300 text-[10px]">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">STRAIGHT-LINE FALLBACK</span>
+                    OSRM road data unavailable — showing direct path. Use Google Maps for real directions.
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-2 text-emerald-300 text-[10px]">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">REAL ROAD ROUTE COMPUTED</span>
+                    OSRM route via actual roads displayed on map.
+                  </div>
+                </div>
+              )}
+
+              {routeError && (
+                <p className="text-[9px] text-rose-400 font-mono bg-rose-950/20 border border-rose-800/40 rounded px-2 py-1">{routeError}</p>
+              )}
+
+              {/* Origin */}
               <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg">
-                <div className="text-[10px] text-slate-400 font-mono uppercase">Origin Danger Node</div>
-                <div className="text-sm font-bold text-rose-400 mt-0.5">{selectedMarker.name}</div>
-                <div className="text-[10px] text-slate-300 font-mono mt-1 leading-relaxed">
-                  {selectedMarker.details}
+                <div className="text-[9px] text-slate-500 uppercase mb-0.5">Evacuating From</div>
+                <div className="text-xs font-bold text-rose-300">{selectedMarker.name}</div>
+                <div className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                  {selectedMarker.lat.toFixed(5)}°N, {selectedMarker.lng.toFixed(5)}°E
                 </div>
               </div>
 
-              <div className="flex justify-center my-1 text-slate-500">
-                <ArrowRight className="w-5 h-5 text-cyan-400 animate-pulse rotate-90 xl:rotate-0" />
-              </div>
-
+              {/* Destination */}
               <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg">
-                <div className="text-[10px] text-slate-400 font-mono uppercase">Allocated Safe Shelter</div>
-                <div className="text-sm font-bold text-emerald-400 mt-0.5">
-                  {activeEvacuationRoute.targetShelterName}
-                </div>
+                <div className="text-[9px] text-slate-500 uppercase mb-0.5">Nearest Safe Shelter</div>
+                <div className="text-xs font-bold text-emerald-400">{activeEvacuationRoute.targetShelterName}</div>
+                {activeEvacuationRoute.targetShelter && (
+                  <div className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                    {activeEvacuationRoute.targetShelter.lat.toFixed(5)}°N,{' '}
+                    {activeEvacuationRoute.targetShelter.lng.toFixed(5)}°E
+                  </div>
+                )}
               </div>
 
-              {/* Dynamic Path Calculations */}
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                <div className="p-2.5 bg-slate-900/40 border border-slate-850 rounded">
-                  <span className="text-slate-500 block text-[9px] uppercase">Evac Distance</span>
+              {/* Stats grid */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2.5 bg-slate-900/40 border border-slate-800 rounded">
+                  <span className="text-[9px] text-slate-500 block uppercase">Road Distance</span>
                   <span className="text-cyan-400 font-extrabold text-sm">{activeEvacuationRoute.distance}</span>
                 </div>
-                <div className="p-2.5 bg-slate-900/40 border border-slate-850 rounded">
-                  <span className="text-slate-500 block text-[9px] uppercase">Travel Time</span>
+                <div className="p-2.5 bg-slate-900/40 border border-slate-800 rounded">
+                  <span className="text-[9px] text-slate-500 block uppercase">Est. Drive Time</span>
                   <span className="text-cyan-400 font-extrabold text-sm">{activeEvacuationRoute.time}</span>
                 </div>
               </div>
 
-              <div className="p-2.5 bg-slate-900/40 border border-slate-850 rounded text-xs font-mono">
-                <span className="text-slate-500 block text-[9px] uppercase">Evacuation Route Status</span>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  <span className="text-slate-200 font-bold">{activeEvacuationRoute.roadCondition}</span>
-                </div>
+              {/* Road condition */}
+              <div className="p-2.5 bg-slate-900/40 border border-slate-800 rounded text-[10px]">
+                <span className="text-[9px] text-slate-500 block uppercase mb-0.5">Route Condition</span>
+                <span className="text-slate-200 font-bold">{activeEvacuationRoute.roadCondition}</span>
               </div>
+
+              {/* Google Maps redirect */}
+              <button
+                onClick={openGoogleMaps}
+                className="w-full py-3 rounded-lg bg-[#4285f4] hover:bg-[#2563eb] text-white font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-950/30"
+              >
+                <ExternalLink className="w-4 h-4 shrink-0" />
+                Open Turn-by-Turn in Google Maps
+              </button>
+
+              {/* Quick directions link as text */}
+              <p className="text-[9px] text-slate-500 text-center font-mono">
+                Opens Google Maps driving directions in a new tab
+              </p>
             </div>
-          ) : (
+          ) : !routeLoading ? (
             <div className="py-8 px-4 text-center border border-dashed border-slate-800 rounded-lg">
               <Info className="w-8 h-8 text-slate-600 mx-auto mb-2" />
               <p className="text-xs text-slate-400 leading-relaxed font-mono">
-                Select any <span className="text-rose-400 font-bold">Red</span> or{' '}
-                <span className="text-amber-400 font-bold">Yellow</span> hazard node on the GIS Map to resolve and plot the optimal escape vector route.
+                Click any{' '}
+                <span className="text-rose-400 font-bold">Red</span> or{' '}
+                <span className="text-amber-400 font-bold">Yellow</span> marker on the map
+                to compute the real road route to the nearest safe shelter.
               </p>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Selected Marker Telemetry Details */}
+        {/* Selected marker telemetry */}
         {selectedMarker && (
-          <div className="glass-panel rounded-xl p-5 border-l-4 border-l-slate-400 flex flex-col gap-3">
+          <div className="glass-panel rounded-xl p-5 border-l-4 border-l-slate-500 flex flex-col gap-3 font-mono">
             <div className="flex justify-between items-start">
               <div>
-                <h3 className="text-sm font-bold text-slate-200">{selectedMarker.name}</h3>
-                <span className="text-[10px] text-slate-400 font-mono">ID: {selectedMarker.id}</span>
+                <h3 className="text-xs font-bold text-slate-200">{selectedMarker.name}</h3>
+                <span className="text-[9px] text-slate-500 font-mono">
+                  {selectedMarker.lat.toFixed(5)}°N, {selectedMarker.lng.toFixed(5)}°E
+                </span>
               </div>
-              <span
-                className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded uppercase ${
-                  selectedMarker.status === 'danger'
-                    ? 'bg-rose-950 text-rose-400'
-                    : selectedMarker.status === 'warning'
-                    ? 'bg-amber-950 text-amber-400'
-                    : 'bg-emerald-950 text-emerald-400'
-                }`}
-              >
-                {selectedMarker.status}
-              </span>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
+                selectedMarker.status === 'danger'  ? 'bg-rose-950 text-rose-400' :
+                selectedMarker.status === 'warning' ? 'bg-amber-950 text-amber-400' :
+                'bg-emerald-950 text-emerald-400'
+              }`}>{selectedMarker.status}</span>
             </div>
 
-            <div className="space-y-2 text-xs font-mono">
+            <div className="space-y-2 text-xs">
               <div className="flex justify-between border-b border-slate-900 pb-1">
-                <span className="text-slate-500">Soil Hazard Index:</span>
+                <span className="text-slate-500">Risk Score:</span>
                 <span className={`font-bold ${selectedMarker.risk > 80 ? 'text-rose-400' : 'text-slate-200'}`}>
                   {selectedMarker.risk}%
                 </span>
               </div>
-              <div className="flex justify-between border-b border-slate-900 pb-1">
-                <span className="text-slate-500">Vulnerable Population:</span>
-                <span className="font-bold text-slate-200">{selectedMarker.population} residents</span>
-              </div>
+              {selectedMarker.status !== 'safe' && (
+                <div className="flex justify-between border-b border-slate-900 pb-1">
+                  <span className="text-slate-500">Affected Residents:</span>
+                  <span className="font-bold text-slate-200">{selectedMarker.population.toLocaleString()}</span>
+                </div>
+              )}
               <div className="flex flex-col gap-0.5 pt-1">
-                <span className="text-slate-500">Geotechnical Analysis:</span>
-                <span className="text-slate-350 leading-relaxed text-[11px] mt-1 bg-slate-950 p-2 rounded border border-slate-850">
+                <span className="text-slate-500">Assessment:</span>
+                <span className="text-slate-400 leading-relaxed text-[10px] mt-1 bg-slate-950 p-2.5 rounded border border-slate-900">
                   {selectedMarker.details}
                 </span>
               </div>
+              {/* Direct Google Maps link for selected location */}
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${selectedMarker.lat},${selectedMarker.lng}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-[9px] text-cyan-400 hover:text-cyan-300 transition-colors pt-1"
+              >
+                <MapPin className="w-3 h-3" />
+                View location in Google Maps
+              </a>
             </div>
           </div>
         )}
-
-        {/* References Card */}
-        <div className="glass-panel rounded-xl p-4 flex flex-col gap-2 bg-slate-900/20">
-          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
-            National Standards Citation
-          </h4>
-          <p className="text-[10px] text-slate-400 leading-relaxed font-mono">
-            Hazard indicators and risk assessments follow the{' '}
-            <span className="text-slate-200">NDMA Landslide Guidelines (2019)</span> and geological datasets from{' '}
-            <span className="text-slate-200">ISRO Bhuvan</span> and the{' '}
-            <span className="text-slate-200">Geological Survey of India (GSI)</span>.
-          </p>
-        </div>
       </div>
     </div>
   );
 };
+
+// ─── Haversine distance (km) ─────────────────────────────────────────────────
+function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Haversine distance (meters) ─────────────────────────────────────────────
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Check if a safe shelter falls inside any active threat's severity range
+export function isShelterCompromised(shelterLat: number, shelterLng: number, allMarkers: HazardMarker[]): { compromised: boolean; threatName?: string } {
+  for (const m of allMarkers) {
+    if (m.status !== 'safe' && m.risk > 10) {
+      const radiusMeters = m.radius || 1000;
+      const distanceMeters = haversineMeters(m.lat, m.lng, shelterLat, shelterLng);
+      if (distanceMeters <= radiusMeters) {
+        return { compromised: true, threatName: m.name };
+      }
+    }
+  }
+  return { compromised: false };
+}
+
 export default TabGisMap;
