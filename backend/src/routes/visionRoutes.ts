@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -11,10 +11,10 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
       return res.status(400).json({ error: 'No image uploaded' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       // Mock fallback if user hasn't set API key
-      console.warn('GEMINI_API_KEY not found in .env, falling back to mock logic.');
+      console.warn('GROQ_API_KEY not found in .env, falling back to mock logic.');
       return res.json({
         isHazard: false,
         prediction: 'Mock Safe Environment (API Key Missing)',
@@ -23,8 +23,7 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
       });
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const groq = new Groq({ apiKey });
 
     const prompt = `
       You are an expert disaster management AI.
@@ -38,17 +37,31 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
       }
     `;
 
-    const imageParts = [
-      {
-        inlineData: {
-          data: req.file.buffer.toString('base64'),
-          mimeType: req.file.mimetype
-        }
-      }
-    ];
+    const base64Image = req.file.buffer.toString('base64');
+    const mimeType = req.file.mimetype;
+    const dataUri = `data:${mimeType};base64,${base64Image}`;
 
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const responseText = result.response.text();
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'image_url',
+              image_url: {
+                url: dataUri
+              }
+            }
+          ]
+        }
+      ],
+      model: 'llama-3.2-11b-vision-preview',
+      temperature: 0.1,
+      response_format: { type: 'json_object' }
+    });
+
+    const responseText = chatCompletion.choices[0]?.message?.content || '{}';
     
     // Extract JSON from markdown if present
     const jsonStr = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -57,7 +70,7 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
       const parsedJson = JSON.parse(jsonStr);
       res.json(parsedJson);
     } catch (e) {
-      console.error('Failed to parse Gemini response', responseText);
+      console.error('Failed to parse Groq response', responseText);
       res.status(500).json({ error: 'Failed to parse AI response' });
     }
 

@@ -54,7 +54,7 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
   userGps,
 }) => {
   // Filter data for active location
-  const activeMarkers = markers.filter((m) => m.locationId === locationId);
+  const activeMarkers = markers.filter((m) => m.status === 'safe' || m.locationId === locationId);
   const activeShelters = shelters.filter((s) => s.locationId === locationId);
   const activeWorkOrders = workOrders.filter((w) => w.locationId === locationId);
 

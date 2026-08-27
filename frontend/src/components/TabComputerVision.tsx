@@ -35,7 +35,7 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
     updatePipelineStep(1); // Set pipeline step to 1: DETECT
 
     const logs = [
-      'Initializing Cloud Connection to Google Gemini API...',
+      'Initializing Cloud Connection to Groq Vision API...',
       'Uploading visual tensor data...',
       'Extracting structural semantics & multimodal features...',
       'Evaluating bounding boxes & risk severity...',
@@ -121,7 +121,7 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
             population: 50,
             lat: userGps ? userGps.lat : 30.56,
             lng: userGps ? userGps.lng : 79.55,
-            details: 'Anomaly detected via Google Gemini Multimodal Vision API. Immediate inspection required.',
+            details: 'Anomaly detected via Groq Vision API. Immediate inspection required.',
             x: 55,
             y: 50,
           });

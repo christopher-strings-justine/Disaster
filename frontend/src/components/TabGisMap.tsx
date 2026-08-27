@@ -253,9 +253,9 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     setSelectedResult(null);
   };
   const activeMarkers = markers.filter(m => 
-    locationId === 'joshimath' 
+    m.status === 'safe' || (locationId === 'joshimath' 
       ? m.locationId === 'joshimath' 
-      : (m.locationId === 'chennai' || m.locationId === 'wayanad')
+      : (m.locationId === 'chennai' || m.locationId === 'wayanad'))
   );
   const centre = LOCATION_CENTRES[locationId];
   const zoom   = LOCATION_ZOOM[locationId];
