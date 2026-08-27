@@ -221,7 +221,7 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
       radius: provisionType === 'shelter' ? undefined : customRadiusVal,
     };
 
-    registerCustomMarker(newMarker);
+    registerCustomMarker(newMarker, { hospitalBeds, personnelCount });
     
     // Reset state
     setLocQuery('');
@@ -229,10 +229,16 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
     setSelectedResult(null);
   };
 
+  // Shelter Registration State
+  const [hospitalBeds, setHospitalBeds] = useState(50);
+  const [personnelCount, setPersonnelCount] = useState(20);
+
   // Responder Registration State
   const [responderName, setResponderName] = useState('');
   const [responderType, setResponderType] = useState<'Police' | 'Fire' | 'Medical' | 'NGO'>('Police');
   const [responderLoc, setResponderLoc] = useState('');
+  const [vehicleCount, setVehicleCount] = useState(3);
+  const [personnelSize, setPersonnelSize] = useState(15);
 
   const handleAddAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,10 +259,12 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
   const handleResponderSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (responderName && responderLoc) {
-      registerResponder(responderName, responderType, responderLoc);
+      registerResponder(responderName, responderType, responderLoc, vehicleCount, personnelSize);
       // Reset form
       setResponderName('');
       setResponderLoc('');
+      setVehicleCount(3);
+      setPersonnelSize(15);
     }
   };
 
@@ -788,14 +796,38 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-slate-500 uppercase block">Beds Capacity</label>
-                      <input
-                        type="number"
-                        value={shelterCapacity}
-                        onChange={(e) => setShelterCapacity(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none font-mono"
-                      />
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-slate-500 uppercase block">Refuge Capacity (Total)</label>
+                        <input
+                          type="number"
+                          value={shelterCapacity}
+                          onChange={(e) => setShelterCapacity(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 border border-slate-800 p-2 rounded bg-slate-900/50">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase block">Hospital Beds / Medical</label>
+                          <input
+                            type="number"
+                            value={hospitalBeds}
+                            onChange={(e) => setHospitalBeds(parseInt(e.target.value) || 0)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
+                            min={0}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-slate-500 uppercase block">Medical Personnel / Doctors</label>
+                          <input
+                            type="number"
+                            value={personnelCount}
+                            onChange={(e) => setPersonnelCount(parseInt(e.target.value) || 0)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
+                            min={0}
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -869,6 +901,29 @@ export const TabDemoControls: React.FC<TabDemoControlsProps> = ({
                       className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
                       required
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-slate-500 uppercase block">Vehicles / Ambulances</label>
+                      <input
+                        type="number"
+                        value={vehicleCount}
+                        onChange={(e) => setVehicleCount(parseInt(e.target.value) || 0)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
+                        min={1}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-slate-500 uppercase block">Active Personnel</label>
+                      <input
+                        type="number"
+                        value={personnelSize}
+                        onChange={(e) => setPersonnelSize(parseInt(e.target.value) || 0)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] text-slate-200 focus:outline-none"
+                        min={1}
+                      />
+                    </div>
                   </div>
 
                   <button

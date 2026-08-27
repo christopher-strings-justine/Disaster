@@ -90,12 +90,12 @@ export const TabGlobalLive: React.FC = () => {
           {loading && (
             <div className="absolute inset-0 bg-slate-950/80 z-[1000] flex flex-col items-center justify-center">
               <div className="w-10 h-10 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mb-4" />
-              <div className="text-rose-400 font-mono text-xs">Connecting to global satellite feeds...</div>
+              <div className="text-rose-400 font-mono text-xs">Connecting to regional satellite feeds...</div>
             </div>
           )}
           <MapContainer
-            center={[20, 0]}
-            zoom={2}
+            center={[22.5937, 78.9629]}
+            zoom={4.5}
             style={{ height: '100%', width: '100%', minHeight: '420px' }}
             scrollWheelZoom
             className="z-0"
@@ -193,7 +193,7 @@ export const TabGlobalLive: React.FC = () => {
               
             {disasters.filter(d => d.severityScore >= 80).length === 0 && !loading && (
               <div className="text-center py-10 text-slate-500 text-xs font-mono">
-                No critical threats (Score >= 80) currently detected by AI.
+                No critical threats (Score &gt;= 80) currently detected by AI.
               </div>
             )}
           </div>

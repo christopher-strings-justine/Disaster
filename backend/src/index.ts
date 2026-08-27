@@ -1,24 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
 import { fetchAndStoreEonetData } from './services/eonetService';
 import { analyzeDisasters } from './services/aiService';
-import Disaster from './models/Disaster';
+import { disastersStore } from './models/Disaster';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/disaster-sih';
 
 app.use(cors());
 app.use(express.json());
-
-// MongoDB Connection
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Connected'))
-  .catch(err => console.error('MongoDB Connection Error:', err));
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -26,10 +19,12 @@ app.get('/api/health', (req, res) => {
 });
 
 // Get all active disasters
-app.get('/api/disasters', async (req, res) => {
+app.get('/api/disasters', (req, res) => {
   try {
-    const disasters = await Disaster.find({ status: 'active' }).sort({ date: -1 });
-    res.json(disasters);
+    const activeDisasters = disastersStore
+      .filter(d => d.status === 'active')
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
+    res.json(activeDisasters);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch disasters' });
   }

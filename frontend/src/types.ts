@@ -27,6 +27,9 @@ export interface Shelter {
   waterLevel: number; // percentage (0-100)
   rations: number; // percentage (0-100)
   medicalKits: number; // percentage (0-100)
+  hospitalBeds: number;
+  personnelCount: number;
+  inventoryDetails: string;
   lat?: number; // real-world latitude (optional)
   lng?: number; // real-world longitude (optional)
 }
@@ -39,6 +42,9 @@ export interface FieldResponder {
   location: string;
   progress: number; // 0-100 for dispatch animation
   taskId: string | null;
+  vehicleCount: number;
+  personnelSize: number;
+  equipmentDetails: string;
 }
 
 export interface WorkOrder {

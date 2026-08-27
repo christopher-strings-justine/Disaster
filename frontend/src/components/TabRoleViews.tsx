@@ -318,6 +318,14 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
                         {resp.taskId ? `Order #${resp.taskId}` : 'None (Available)'}
                       </span>
                     </div>
+                    <div className="flex justify-between pt-1 border-t border-slate-900/50">
+                      <span>Active Vehicles:</span>
+                      <span className="text-slate-200">{resp.vehicleCount || 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Active Personnel:</span>
+                      <span className="text-slate-200">{resp.personnelSize || 0}</span>
+                    </div>
                   </div>
 
                   {/* Progress Indicator if moving */}
@@ -481,6 +489,18 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
+                        <div className="text-right border-r border-slate-800 pr-3">
+                          <span className="text-[10px] text-slate-500 font-mono block">Medical Beds</span>
+                          <span className="text-xs font-mono font-bold text-amber-400">
+                            {shelter.hospitalBeds || 0}
+                          </span>
+                        </div>
+                        <div className="text-right border-r border-slate-800 pr-3">
+                          <span className="text-[10px] text-slate-500 font-mono block">Personnel</span>
+                          <span className="text-xs font-mono font-bold text-cyan-400">
+                            {shelter.personnelCount || 0}
+                          </span>
+                        </div>
                         <div className="text-right">
                           <span className="text-[10px] text-slate-500 font-mono block">Occupancy Rate</span>
                           <span className="text-xs font-mono font-bold text-slate-350">

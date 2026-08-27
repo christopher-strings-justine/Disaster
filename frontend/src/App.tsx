@@ -321,7 +321,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const registerShelter = (name: string, locationId: LocationId, lat: number, lng: number, capacity: number) => {
+  const registerShelter = (name: string, locationId: LocationId, lat: number, lng: number, capacity: number, hospitalBeds: number, personnelCount: number) => {
     let x = 50;
     let y = 50;
     if (locationId === 'chennai') {
@@ -359,6 +359,9 @@ export const App: React.FC = () => {
       waterLevel: 100,
       rations: 100,
       medicalKits: 100,
+      hospitalBeds: hospitalBeds,
+      personnelCount: personnelCount,
+      inventoryDetails: 'Standard Setup',
     };
 
     setMarkers((prev) => [...prev, newMarker]);
@@ -370,7 +373,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const registerCustomMarker = (marker: HazardMarker) => {
+  const registerCustomMarker = (marker: HazardMarker, shelterProps?: { hospitalBeds: number, personnelCount: number }) => {
     setMarkers((prev) => [...prev, marker]);
     if (marker.status === 'safe') {
       const newShelter: Shelter = {
@@ -382,6 +385,9 @@ export const App: React.FC = () => {
         waterLevel: 100,
         rations: 100,
         medicalKits: 100,
+        hospitalBeds: shelterProps?.hospitalBeds || 50,
+        personnelCount: shelterProps?.personnelCount || 20,
+        inventoryDetails: 'Basic emergency provisions',
         lat: marker.lat,
         lng: marker.lng,
       };
@@ -393,7 +399,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const registerResponder = (name: string, type: 'Police' | 'Fire' | 'Medical' | 'NGO', location: string) => {
+  const registerResponder = (name: string, type: 'Police' | 'Fire' | 'Medical' | 'NGO', location: string, vehicleCount: number, personnelSize: number) => {
     const newResp: FieldResponder = {
       id: `res-auto-${Date.now().toString().slice(-4)}`,
       name: name,
@@ -402,6 +408,9 @@ export const App: React.FC = () => {
       location: location,
       progress: 0,
       taskId: null,
+      vehicleCount: vehicleCount,
+      personnelSize: personnelSize,
+      equipmentDetails: 'Standard Issued Kits',
     };
     setResponders((prev) => [...prev, newResp]);
     setToast({
