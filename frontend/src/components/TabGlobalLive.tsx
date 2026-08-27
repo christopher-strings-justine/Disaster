@@ -109,12 +109,26 @@ export const TabGlobalLive: React.FC = () => {
 
             {disasters.map(d => {
               const isHighRisk = d.severityScore >= 80;
+              // Dynamic radius: Base 50km, scales with severity score up to 200km
+              const radiusMeters = 50000 + (d.severityScore || 50) * 1500;
+              
               return (
-                <Marker
-                  key={d._id}
-                  position={[d.coordinates.lat, d.coordinates.lng]}
-                  icon={isHighRisk ? HIGH_RISK_ICON : DEFAULT_ICON}
-                >
+                <React.Fragment key={d._id}>
+                  <Circle
+                    center={[d.coordinates.lat, d.coordinates.lng]}
+                    radius={radiusMeters}
+                    pathOptions={{
+                      color: isHighRisk ? '#ef4444' : '#f59e0b',
+                      fillColor: isHighRisk ? '#ef4444' : '#f59e0b',
+                      fillOpacity: 0.2,
+                      weight: 1,
+                      className: 'animate-pulse' // dynamic red-zone engine pulsing effect
+                    }}
+                  />
+                  <Marker
+                    position={[d.coordinates.lat, d.coordinates.lng]}
+                    icon={isHighRisk ? HIGH_RISK_ICON : DEFAULT_ICON}
+                  >
                   <Popup className="leaflet-popup-dark">
                     <div className="p-2 min-w-[220px]">
                       <div className="flex items-center gap-2 mb-2 border-b border-slate-700 pb-2">
@@ -146,6 +160,7 @@ export const TabGlobalLive: React.FC = () => {
                     </div>
                   </Popup>
                 </Marker>
+                </React.Fragment>
               );
             })}
           </MapContainer>
