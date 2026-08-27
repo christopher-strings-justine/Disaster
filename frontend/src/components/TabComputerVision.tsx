@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Eye, RefreshCw, Cpu, Activity, AlertCircle, Sparkles } from 'lucide-react';
 import { CV_PRESET_IMAGES } from '../mockData';
 import { CvPresetImage, BoundingBox } from '../types';
@@ -21,82 +21,119 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanComplete, setScanComplete] = useState<boolean>(false);
   const [scanLog, setScanLog] = useState<string[]>([]);
+  const [aiResult, setAiResult] = useState<{ isHazard: boolean; prediction: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
-  const startScanning = (img: CvPresetImage | { id: string; name: string; url: string }) => {
+  const startScanning = async (
+    img: CvPresetImage | { id: string; name: string; url: string }, 
+    file?: File
+  ) => {
     setIsScanning(true);
     setScanComplete(false);
     setScanLog([]);
     updatePipelineStep(1); // Set pipeline step to 1: DETECT
 
     const logs = [
-      'Initializing ResNet-50 Convolutional Layers...',
-      'Mapping RGB tensors to float matrices...',
-      'Running sliding-window bounding box anchor regressions...',
-      'Confidence score threshold reached. Filtering overlapping anchors...',
-      'Feature extraction completed. Structural degradation located.',
+      'Initializing Cloud Connection to Google Gemini API...',
+      'Uploading visual tensor data...',
+      'Extracting structural semantics & multimodal features...',
+      'Evaluating bounding boxes & risk severity...',
+      'Analysis completed.',
     ];
 
     logs.forEach((log, index) => {
       setTimeout(() => {
         setScanLog((prev) => [...prev, `[AI-LOG] ${log}`]);
-      }, (index + 1) * 350);
+      }, (index + 1) * 400);
     });
 
-    setTimeout(() => {
+    try {
+      let isHazard = true;
+      let prediction = 'Structural Damage / Anomaly';
+      
+      // If it's a custom uploaded file, query the real Gemini backend
+      if (file) {
+        const formData = new FormData();
+        formData.append('image', file);
+        
+        const res = await fetch('http://localhost:3001/api/vision/analyze', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          isHazard = data.isHazard;
+          prediction = data.prediction || 'Unknown Anomaly';
+          setAiResult(data);
+        } else {
+          setScanLog(prev => [...prev, `[AI-ERROR] Failed to reach vision API backend.`]);
+          throw new Error('API Error');
+        }
+      } else {
+         // Fake delay for presets
+         await new Promise(resolve => setTimeout(resolve, 2000));
+         setAiResult({ isHazard: true, prediction: img.id === 'cv-img-1' ? 'Severe Pothole' : 'Tension Fissure' });
+      }
+
       setIsScanning(false);
       setScanComplete(true);
 
-      // Trigger global state hazard addition
-      if (img.id === 'cv-img-1') {
-        onHazardDetected({
-          id: 'cv-' + Date.now(),
-          name: 'Mundakkai Pothole Node',
-          locationId: 'wayanad',
-          status: 'danger',
-          risk: 84,
-          population: 150,
-          lat: 11.5755,
-          lng: 76.0535,
-          details: 'Pothole detected via drone CV scan. Threat of road damage halting transport.',
-          x: 48,
-          y: 60,
-        });
-      } else if (img.id === 'cv-img-2') {
-        onHazardDetected({
-          id: 'cv-' + Date.now(),
-          name: 'Sunil Fissure Creep Node',
-          locationId: 'joshimath',
-          status: 'danger',
-          risk: 92,
-          population: 320,
-          lat: 30.555,
-          lng: 79.56,
-          details: 'Active ground tension fissure detected by aerial AI segmentation model.',
-          x: 35,
-          y: 48,
-        });
-      } else {
-        // Custom uploaded image hazard (Ceiling / Hole / Real-world upload)
-        onHazardDetected({
-          id: 'cv-' + Date.now(),
-          name: 'Ceiling Structural Damage / Hole Detected',
-          locationId: 'joshimath',
-          status: 'danger',
-          risk: 85,
-          population: 50,
-          // Use user's exact GPS if they have it turned on, else default to a fallback location
-          lat: userGps ? userGps.lat : 30.56,
-          lng: userGps ? userGps.lng : 79.55,
-          details: 'Severe localized structural damage (ceiling puncture) detected via user-uploaded imagery. Immediate structural inspection required.',
-          x: 55,
-          y: 50,
-        });
+      if (isHazard) {
+        // Trigger global state hazard addition
+        if (img.id === 'cv-img-1') {
+          onHazardDetected({
+            id: 'cv-' + Date.now(),
+            name: 'Mundakkai Pothole Node',
+            locationId: 'wayanad',
+            status: 'danger',
+            risk: 84,
+            population: 150,
+            lat: 11.5755,
+            lng: 76.0535,
+            details: 'Pothole detected via drone CV scan. Threat of road damage halting transport.',
+            x: 48,
+            y: 60,
+          });
+        } else if (img.id === 'cv-img-2') {
+          onHazardDetected({
+            id: 'cv-' + Date.now(),
+            name: 'Sunil Fissure Creep Node',
+            locationId: 'joshimath',
+            status: 'danger',
+            risk: 92,
+            population: 320,
+            lat: 30.555,
+            lng: 79.56,
+            details: 'Active ground tension fissure detected by aerial AI segmentation model.',
+            x: 35,
+            y: 48,
+          });
+        } else {
+          // Custom uploaded image hazard (Real-world upload)
+          onHazardDetected({
+            id: 'cv-' + Date.now(),
+            name: 'AI Detected Anomaly: ' + prediction,
+            locationId: 'joshimath',
+            status: 'danger',
+            risk: 85,
+            population: 50,
+            lat: userGps ? userGps.lat : 30.56,
+            lng: userGps ? userGps.lng : 79.55,
+            details: 'Anomaly detected via Google Gemini Multimodal Vision API. Immediate inspection required.',
+            x: 55,
+            y: 50,
+          });
+        }
+        
+        // Update to step 2: ASSESS only if it's a hazard
+        updatePipelineStep(2);
       }
-
-      // Update to step 2: ASSESS
-      updatePipelineStep(2);
-    }, 2000);
+    } catch (e) {
+      console.error(e);
+      setIsScanning(false);
+    }
   };
 
   const handlePresetSelect = (preset: CvPresetImage) => {
@@ -117,7 +154,7 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
           id: 'custom-upload',
           name: file.name,
           url: url,
-        });
+        }, file);
       };
       reader.readAsDataURL(file);
     }
@@ -130,6 +167,8 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
   // Helper variables for bounding box coordinates
   const activeBoxes: BoundingBox[] = selectedImg
     ? selectedImg.boundingBoxes
+    : customImgUrl && aiResult && !aiResult.isHazard
+    ? [] // No box if safe
     : customImgUrl
     ? [
         {
@@ -137,14 +176,19 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
           y: 25,
           w: 50,
           h: 50,
-          label: 'Fissure/Pothole Structure',
+          label: aiResult ? `Anomaly: ${aiResult.prediction}` : 'Analyzing Structure...',
           confidence: 89.4,
         },
       ]
     : [];
 
   const displayUrl = selectedImg ? selectedImg.url : customImgUrl;
-  const currentHazardName = selectedImg ? selectedImg.hazardType : 'Custom Structural Defect';
+  
+  let currentHazardName = selectedImg ? selectedImg.hazardType : 'Custom Structural Defect';
+  if (customImgUrl && aiResult) {
+    currentHazardName = aiResult.isHazard ? `Anomaly: ${aiResult.prediction}` : `No Hazard: ${aiResult.prediction}`;
+  }
+  
   const currentConfidence = selectedImg ? selectedImg.confidence : 89.4;
   const currentLocation = selectedImg ? selectedImg.locationTag : 'User Upload coordinate';
 
@@ -254,6 +298,8 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
           {displayUrl ? (
             <div className="relative max-w-full max-h-[400px] overflow-hidden rounded border border-slate-900 shadow-2xl">
               <img
+                ref={imgRef}
+                crossOrigin="anonymous"
                 src={displayUrl}
                 alt="Scan Area"
                 className={`w-full h-full object-contain max-h-[390px] transition-all ${
@@ -312,8 +358,10 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
               ))}
               {isScanning && <div className="text-cyan-400 animate-pulse font-bold">[AI-RUN] Mapping matrices...</div>}
               {scanComplete && (
-                <div className="text-emerald-400 font-bold">
-                  [SUCCESS] Classifications resolved. Work order dispatched to Dispatch Desk.
+                <div className={`font-bold ${aiResult && !aiResult.isHazard ? 'text-slate-400' : 'text-emerald-400'}`}>
+                  {aiResult && !aiResult.isHazard 
+                    ? '[INFO] Image classified as safe. No action required.'
+                    : '[SUCCESS] Classifications resolved. Work order dispatched to Dispatch Desk.'}
                 </div>
               )}
             </div>
@@ -322,7 +370,7 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
             <div className="glass-panel-hover rounded border border-slate-900 p-3 font-mono text-xs text-slate-350 space-y-2 flex flex-col justify-center">
               <div className="flex justify-between border-b border-slate-900 pb-1 text-[10px]">
                 <span className="text-slate-500">Hazard Class:</span>
-                <span className={`font-bold ${scanComplete && !isScanning ? 'text-rose-400' : 'text-slate-500'}`}>
+                <span className={`font-bold ${scanComplete && !isScanning ? (aiResult && !aiResult.isHazard ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}`}>
                   {isScanning ? 'Processing...' : scanComplete ? currentHazardName : 'Offline'}
                 </span>
               </div>
@@ -340,8 +388,8 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
               </div>
               <div className="flex justify-between text-[10px]">
                 <span className="text-slate-500">Dispatch Order:</span>
-                <span className={`font-bold ${scanComplete && !isScanning ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {isScanning ? 'Allocating...' : scanComplete ? 'ORDER DISPATCHED' : 'None'}
+                <span className={`font-bold ${scanComplete && !isScanning ? (aiResult && !aiResult.isHazard ? 'text-slate-500' : 'text-emerald-400') : 'text-slate-500'}`}>
+                  {isScanning ? 'Allocating...' : scanComplete ? (aiResult && !aiResult.isHazard ? 'NO DISPATCH REQUIRED' : 'ORDER DISPATCHED') : 'None'}
                 </span>
               </div>
             </div>

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { fetchAndStoreEonetData } from './services/eonetService';
 import { analyzeDisasters } from './services/aiService';
 import { disastersStore } from './models/Disaster';
+import visionRoutes from './routes/visionRoutes';
 
 dotenv.config();
 
@@ -14,6 +15,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+app.use('/api/vision', visionRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Disaster API Backend is running' });
 });

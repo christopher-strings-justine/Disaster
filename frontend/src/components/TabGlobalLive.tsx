@@ -151,7 +151,13 @@ export const TabGlobalLive: React.FC = () => {
                         </div>
                       )}
                       
-                      <div className="flex justify-between items-center mt-2">
+                      <div className="flex justify-between items-center mt-2 border-b border-slate-800 pb-1">
+                        <span className="text-[9px] text-slate-500">Affected Population:</span>
+                        <span className="text-[10px] font-mono text-cyan-400">
+                          {d.population ? d.population.toLocaleString('en-US') : 'Calculating...'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-1">
                         <span className="text-[9px] text-slate-500">Severity Score:</span>
                         <span className={`text-xs font-black ${isHighRisk ? 'text-rose-500' : 'text-amber-500'}`}>
                           {d.severityScore || 'N/A'}
@@ -190,6 +196,11 @@ export const TabGlobalLive: React.FC = () => {
                     </div>
                   </div>
                   <div className="text-xs font-bold text-slate-200 leading-tight mb-2">{d.title}</div>
+                  {d.population && (
+                    <div className="text-[9px] font-mono text-cyan-400 mb-2">
+                      Population at Risk: {d.population.toLocaleString('en-US')}
+                    </div>
+                  )}
                   <div className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed">
                     {d.aiAnalysis}
                   </div>

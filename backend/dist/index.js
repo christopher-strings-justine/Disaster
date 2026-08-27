@@ -9,12 +9,14 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const eonetService_1 = require("./services/eonetService");
 const aiService_1 = require("./services/aiService");
 const Disaster_1 = require("./models/Disaster");
+const visionRoutes_1 = __importDefault(require("./routes/visionRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 // Routes
+app.use('/api/vision', visionRoutes_1.default);
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'Disaster API Backend is running' });
 });

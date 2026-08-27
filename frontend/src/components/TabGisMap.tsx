@@ -267,26 +267,61 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/` +
         `${from.lng},${from.lat};${to.lng},${to.lat}` +
-        `?overview=full&geometries=geojson`;
+        `?overview=full&geometries=geojson&alternatives=true`;
       const res = await fetch(url);
       const data = await res.json();
       if (data.code === 'Ok' && data.routes?.length) {
-        const route = data.routes[0];
-        const coords: [number, number][] = route.geometry.coordinates.map(
+        
+        let bestRoute = data.routes[0];
+        let isRerouted = false;
+        let isCompromised = false; // Flag to indicate if ALL routes pass through hazards
+
+        // Check routes against all danger hazards (except 'from') to find a safe path
+        const dangerHazards = activeMarkers.filter(m => (m.status === 'danger' || m.status === 'warning') && m.id !== from.id);
+        
+        let foundSafeRoute = false;
+        for (const route of data.routes) {
+            let intersects = false;
+            for (const [lng, lat] of route.geometry.coordinates) {
+               for (const hazard of dangerHazards) {
+                  const radiusKm = (hazard.radius || 1000) / 1000;
+                  if (haversine(lat, lng, hazard.lat, hazard.lng) <= radiusKm) {
+                     intersects = true;
+                     break;
+                  }
+               }
+               if (intersects) break;
+            }
+            if (!intersects) {
+               bestRoute = route;
+               foundSafeRoute = true;
+               if (route !== data.routes[0]) isRerouted = true;
+               break;
+            }
+        }
+
+        if (!foundSafeRoute && dangerHazards.length > 0) {
+           isCompromised = true;
+        }
+
+        const coords: [number, number][] = bestRoute.geometry.coordinates.map(
           ([lng, lat]: [number, number]) => [lat, lng]
         );
-        const distKm = (route.distance / 1000).toFixed(1);
-        const timeMins = Math.round(route.duration / 60);
+        const distKm = (bestRoute.distance / 1000).toFixed(1);
+        const timeMins = Math.round(bestRoute.duration / 60);
+        
+        let conditionText = 'Route appears clear';
+        if (isCompromised) conditionText = 'WARNING: No safe roads available. Route intersects active hazard zone.';
+        else if (isRerouted) conditionText = 'Safest alternative path selected (avoids hazards)';
+
         setActiveEvacuationRoute({
           routeCoords: coords,
           distance: `${distKm} km`,
           time: `${timeMins} mins`,
-          roadCondition:
-            from.risk > 80
-              ? 'Heavy Rainfall — Proceed with caution'
-              : 'Route appears clear',
+          roadCondition: conditionText,
           targetShelterName: to.name,
-          isRerouted: false,
+          isRerouted: isRerouted,
+          isCompromised: isCompromised,
           targetShelter: to,
         });
       } else {
@@ -308,7 +343,7 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     }
     setRouteLoading(false);
     updatePipelineStep(5);
-  }, [setActiveEvacuationRoute, updatePipelineStep]);
+  }, [setActiveEvacuationRoute, updatePipelineStep, activeMarkers]);
 
   // ── Find nearest safe shelter and trigger route ─────────────────────────
   useEffect(() => {
@@ -375,8 +410,23 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     if (!selectedMarker || !activeEvacuationRoute?.targetShelter) return;
     const { lat: lat1, lng: lng1 } = selectedMarker;
     const { lat: lat2, lng: lng2 } = activeEvacuationRoute.targetShelter;
+    
+    // Sample up to 8 waypoints from the route to force Google Maps to follow the exact safe path
+    let waypointsStr = '';
+    if (activeEvacuationRoute.routeCoords && activeEvacuationRoute.routeCoords.length > 20) {
+      const coords = activeEvacuationRoute.routeCoords;
+      const numWaypoints = 8;
+      const step = Math.floor(coords.length / (numWaypoints + 1));
+      const waypoints = [];
+      for (let i = 1; i <= numWaypoints; i++) {
+        const point = coords[i * step];
+        waypoints.push(`${point[0]},${point[1]}`); // routeCoords is [lat, lng]
+      }
+      waypointsStr = `&waypoints=${waypoints.join('|')}`;
+    }
+
     window.open(
-      `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=driving`,
+      `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=driving${waypointsStr}`,
       '_blank'
     );
   };
@@ -540,12 +590,21 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
                 {/* Glow outline */}
                 <Polyline
                   positions={activeEvacuationRoute.routeCoords}
-                  pathOptions={{ color: '#3b82f6', weight: 8, opacity: 0.15 }}
+                  pathOptions={{ 
+                    color: (activeEvacuationRoute as any).isCompromised ? '#ef4444' : '#3b82f6', 
+                    weight: 8, 
+                    opacity: 0.15 
+                  }}
                 />
                 {/* Main route */}
                 <Polyline
                   positions={activeEvacuationRoute.routeCoords}
-                  pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.9, dashArray: activeEvacuationRoute.isRerouted ? '10,6' : undefined }}
+                  pathOptions={{ 
+                    color: (activeEvacuationRoute as any).isCompromised ? '#ef4444' : '#3b82f6', 
+                    weight: 4, 
+                    opacity: 0.9, 
+                    dashArray: activeEvacuationRoute.isRerouted || (activeEvacuationRoute as any).isCompromised ? '10,6' : undefined 
+                  }}
                 />
               </>
             )}
@@ -738,12 +797,20 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
                     OSRM road data unavailable — showing direct path. Use Google Maps for real directions.
                   </div>
                 </div>
+              ) : (activeEvacuationRoute as any).isCompromised ? (
+                <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/40 flex items-start gap-2 text-rose-300 text-[10px]">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">COMPROMISED ROUTE</span>
+                    No safe roads exist avoiding the hazard radius. Proceed with extreme caution.
+                  </div>
+                </div>
               ) : (
                 <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-2 text-emerald-300 text-[10px]">
                   <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold block">REAL ROAD ROUTE COMPUTED</span>
-                    OSRM route via actual roads displayed on map.
+                    <span className="font-bold block">SAFE ROAD ROUTE COMPUTED</span>
+                    OSRM route avoiding hazards successfully plotted.
                   </div>
                 </div>
               )}
