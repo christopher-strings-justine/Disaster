@@ -3,23 +3,18 @@ import { Upload, Eye, RefreshCw, Cpu, Activity, AlertCircle, Sparkles } from 'lu
 import { CV_PRESET_IMAGES } from '../mockData';
 import { CvPresetImage, BoundingBox } from '../types';
 
+import { HazardMarker, UserGpsData } from '../types';
+
 interface TabComputerVisionProps {
-  onHazardDetected: (hazard: {
-    name: string;
-    locationId: 'wayanad' | 'joshimath';
-    risk: number;
-    details: string;
-    x: number;
-    y: number;
-    title: string;
-    description: string;
-  }) => void;
+  onHazardDetected: (marker: HazardMarker) => void;
   updatePipelineStep: (step: number) => void;
+  userGps: UserGpsData | null;
 }
 
 export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
   onHazardDetected,
   updatePipelineStep,
+  userGps,
 }) => {
   const [selectedImg, setSelectedImg] = useState<CvPresetImage | null>(null);
   const [customImgUrl, setCustomImgUrl] = useState<string | null>(null);
@@ -55,37 +50,47 @@ export const TabComputerVision: React.FC<TabComputerVisionProps> = ({
       // Trigger global state hazard addition
       if (img.id === 'cv-img-1') {
         onHazardDetected({
+          id: 'cv-' + Date.now(),
           name: 'Mundakkai Pothole Node',
           locationId: 'wayanad',
+          status: 'danger',
           risk: 84,
+          population: 150,
+          lat: 11.5755,
+          lng: 76.0535,
           details: 'Pothole detected via drone CV scan. Threat of road damage halting transport.',
           x: 48,
           y: 60,
-          title: 'CV: Mundakkai Road Damage',
-          description: 'A deep pothole of severe class detected by drone scanning on Mundakkai main link road.',
         });
       } else if (img.id === 'cv-img-2') {
         onHazardDetected({
+          id: 'cv-' + Date.now(),
           name: 'Sunil Fissure Creep Node',
           locationId: 'joshimath',
+          status: 'danger',
           risk: 92,
+          population: 320,
+          lat: 30.555,
+          lng: 79.56,
           details: 'Active ground tension fissure detected by aerial AI segmentation model.',
           x: 35,
           y: 48,
-          title: 'CV: Sunil Ward Creep Fissure',
-          description: 'Structural tension fissure (96.8% confidence) detected on Sector-4 Joshimath. Risk of slide.',
         });
       } else {
-        // Custom uploaded image hazard
+        // Custom uploaded image hazard (Ceiling / Hole / Real-world upload)
         onHazardDetected({
-          name: 'Custom User Uploaded Fissure',
+          id: 'cv-' + Date.now(),
+          name: 'Ceiling Structural Damage / Hole Detected',
           locationId: 'joshimath',
-          risk: 75,
-          details: 'Structural cracks detected via user-uploaded imagery.',
+          status: 'danger',
+          risk: 85,
+          population: 50,
+          // Use user's exact GPS if they have it turned on, else default to a fallback location
+          lat: userGps ? userGps.lat : 30.56,
+          lng: userGps ? userGps.lng : 79.55,
+          details: 'Severe localized structural damage (ceiling puncture) detected via user-uploaded imagery. Immediate structural inspection required.',
           x: 55,
           y: 50,
-          title: 'CV: Uploaded Fissure Warning',
-          description: 'Road fissure identified from user-uploaded image. Priority dispatched.',
         });
       }
 

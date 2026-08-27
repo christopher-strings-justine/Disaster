@@ -93,10 +93,10 @@ export const App: React.FC = () => {
   }, [simLocation, systemAlert]);
 
   // ── Core Datasets ─────────────────────────────────────────────────────────
-  const [markers, setMarkers] = useLocalStorage<HazardMarker[]>('dp-markers', INITIAL_HAZARD_MARKERS);
-  const [shelters, setShelters] = useLocalStorage<Shelter[]>('dp-shelters', INITIAL_SHELTERS);
-  const [responders, setResponders] = useLocalStorage<FieldResponder[]>('dp-responders', INITIAL_RESPONDERS);
-  const [workOrders, setWorkOrders] = useLocalStorage<WorkOrder[]>('dp-workOrders', INITIAL_WORK_ORDERS);
+  const [markers, setMarkers] = useLocalStorage<HazardMarker[]>('dp-markers', []);
+  const [shelters, setShelters] = useLocalStorage<Shelter[]>('dp-shelters', []);
+  const [responders, setResponders] = useLocalStorage<FieldResponder[]>('dp-responders', []);
+  const [workOrders, setWorkOrders] = useLocalStorage<WorkOrder[]>('dp-workOrders', []);
 
   // ── Evacuation Routing (transient — re-computed from map state) ───────────
   const [selectedMarker, setSelectedMarker] = useState<HazardMarker | null>(null);
@@ -757,8 +757,9 @@ export const App: React.FC = () => {
 
             {activeTab === 'cv' && (
               <TabComputerVision
-                onHazardDetected={onHazardDetected}
+                onHazardDetected={registerCustomMarker}
                 updatePipelineStep={setActivePipelineStep}
+                userGps={userGps}
               />
             )}
 

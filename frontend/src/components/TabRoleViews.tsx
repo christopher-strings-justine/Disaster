@@ -58,6 +58,34 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
   const activeShelters = shelters.filter((s) => s.locationId === locationId);
   const activeWorkOrders = workOrders.filter((w) => w.locationId === locationId);
 
+  const downloadExcelReport = () => {
+    // Requirements: Date, No of Refuges Availed, Places, Disaster Location, Cause, no duplicates on same date
+    const rows: string[] = ['Date,Refuges Availed,Shelter Places,Disaster Location,Cause'];
+    const uniqueDates = new Set<string>();
+
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Process data for today
+    if (!uniqueDates.has(today)) {
+      uniqueDates.add(today);
+      const totalAvailed = shelters.reduce((acc, s) => acc + s.occupancy, 0);
+      const places = shelters.map(s => `"${s.name}"`).join(';');
+      const disasterLocations = activeMarkers.map(m => `"${m.name}"`).join(';');
+      const causes = activeMarkers.map(m => `"${m.type}"`).join(';');
+      
+      rows.push(`${today},${totalAvailed},${places},${disasterLocations},${causes}`);
+    }
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'Daily_Disaster_Report.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Stats Calculations
   const avgRisk = Math.round(
     activeMarkers.reduce((acc, curr) => acc + curr.risk, 0) / (activeMarkers.length || 1)
@@ -84,6 +112,16 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
     case 'dma':
       return (
         <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">District Analytics Overview</h2>
+            <button
+              onClick={downloadExcelReport}
+              className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/50 text-emerald-400 px-3 py-1.5 rounded font-mono text-[10px] hover:bg-emerald-900/80 transition-all cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Export Excel Report
+            </button>
+          </div>
           {/* DMA Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="glass-panel rounded-xl p-4 flex items-center justify-between border-l-4 border-l-rose-500">
@@ -204,11 +242,14 @@ export const TabRoleViews: React.FC<TabRoleViewsProps> = ({
                                 authorizeRelocation(marker.id);
                                 updatePipelineStep(7);
                               }}
-                              className={`py-1 px-3 rounded font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer ${
-                                marker.risk > 80
-                                  ? 'bg-rose-500 hover:bg-rose-600 text-slate-950'
-                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              className={`py-1 px-3 rounded font-extrabold text-[10px] uppercase tracking-wider transition-all ${
+                                marker.population === 0
+                                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                  : marker.risk > 80
+                                  ? 'bg-rose-500 hover:bg-rose-600 text-slate-950 cursor-pointer'
+                                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950 cursor-pointer'
                               }`}
+                              disabled={marker.population === 0}
                             >
                               Authorize Relocate
                             </button>

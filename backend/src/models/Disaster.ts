@@ -9,6 +9,7 @@ export interface IDisaster {
     lng: number;
   };
   severityScore: number;
+  population: number;
   aiAnalysis: string;
   date: Date;
 }
