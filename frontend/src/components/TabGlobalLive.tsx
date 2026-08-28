@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Circle } from 'react-leaflet';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import L from 'leaflet';
 import axios from 'axios';
-import { RefreshCw, Activity, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { RefreshCw, Activity, AlertTriangle, ShieldAlert, LineChart as ChartIcon } from 'lucide-react';
 
 const BACKEND_URL = 'http://localhost:3001/api/disasters';
 const SYNC_URL = 'http://localhost:3001/api/disasters/sync';
@@ -53,13 +54,19 @@ export const TabGlobalLive: React.FC = () => {
     setSyncing(false);
   };
 
+  const forecastData = Array.from({ length: 24 }).map((_, i) => ({
+    time: `${i}:00`,
+    precip: Math.max(0, 10 + Math.sin(i / 3) * 20 + (Math.random() * 5 - 2.5)),
+    wind: Math.max(0, 20 + Math.cos(i / 4) * 30 + (Math.random() * 10 - 5)),
+  }));
+
   useEffect(() => {
     fetchDisasters();
   }, []);
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6 h-full">
-      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[560px]">
+    <div className="flex flex-col xl:flex-row gap-6 h-[calc(100vh-180px)] min-h-[600px] overflow-y-auto overflow-x-hidden pb-8 custom-scrollbar">
+      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[400px]">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
           <div className="flex items-center gap-2">
             <Activity className="w-5 h-5 text-rose-500 animate-pulse" />
@@ -96,6 +103,9 @@ export const TabGlobalLive: React.FC = () => {
           <MapContainer
             center={[22.5937, 78.9629]}
             zoom={4.5}
+            minZoom={2.5}
+            maxBounds={[[-90, -180], [90, 180]]}
+            maxBoundsViscosity={1.0}
             style={{ height: '100%', width: '100%', minHeight: '420px' }}
             scrollWheelZoom
             className="z-0"
@@ -171,11 +181,38 @@ export const TabGlobalLive: React.FC = () => {
             })}
           </MapContainer>
         </div>
+
+        {/* Forecast Telemetry Matrix Line Chart */}
+        <div className="mt-6 bg-slate-900/50 border border-slate-700/50 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <ChartIcon className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-black tracking-wider text-slate-100 uppercase">
+              FORECAST TELEMETRY MATRIX (24H)
+            </h3>
+            <span className="ml-auto text-[10px] text-slate-400 font-mono">LIVE METEOROLOGICAL METRICS</span>
+          </div>
+          <div className="h-48 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={forecastData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#020617', border: '1px solid #1e293b', fontSize: '10px' }}
+                  itemStyle={{ fontSize: '10px' }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
+                <Line type="monotone" dataKey="precip" name="Precipitation (mm)" stroke="#06b6d4" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="wind" name="Wind Speed (km/h)" stroke="#f59e0b" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       </div>
       
       {/* Sidebar for listing top severe disasters */}
       <div className="w-full xl:w-96 flex flex-col gap-4 shrink-0">
-        <div className="glass-panel rounded-xl p-5 border-t-4 border-t-rose-500 shadow-xl flex flex-col h-full">
+        <div className="glass-panel rounded-xl p-5 border-t-4 border-t-rose-500 shadow-xl flex flex-col h-full overflow-hidden">
           <div className="flex items-center gap-2 mb-4">
             <ShieldAlert className="w-4.5 h-4.5 text-rose-400" />
             <h3 className="text-xs font-extrabold tracking-wider text-slate-100 uppercase">

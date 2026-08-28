@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
 import Groq from 'groq-sdk';
+import xss from 'xss';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
 
 router.post('/analyze', upload.single('image'), async (req, res) => {
   try {
@@ -13,8 +17,6 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
 
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-      // Mock fallback if user hasn't set API key
-      console.warn('GROQ_API_KEY not found in .env, falling back to mock logic.');
       return res.json({
         isHazard: false,
         prediction: 'Mock Safe Environment (API Key Missing)',
@@ -56,7 +58,7 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
           ]
         }
       ],
-      model: 'llama-3.2-11b-vision-preview',
+      model: 'qwen/qwen3.8-27b',
       temperature: 0.1,
       response_format: { type: 'json_object' }
     });
@@ -68,15 +70,26 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
     
     try {
       const parsedJson = JSON.parse(jsonStr);
+      if (parsedJson.prediction) {
+        parsedJson.prediction = xss(parsedJson.prediction);
+      }
       res.json(parsedJson);
     } catch (e) {
       console.error('Failed to parse Groq response', responseText);
       res.status(500).json({ error: 'Failed to parse AI response' });
     }
 
-  } catch (error) {
-    console.error('Vision API Error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+  } catch (error: any) {
+    console.error('Vision API Error:', error.message || error);
+    
+    // Do not mask 500 errors as 200 OK in production.
+    res.status(503).json({
+      error: 'AI Analysis Service Temporarily Unavailable',
+      isHazard: false,
+      prediction: 'Service Error',
+      confidence: 0,
+      boundingBoxes: []
+    });
   }
 });
 

@@ -3,10 +3,14 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, CircleMarker,
 import L from 'leaflet';
 import {
   Info, Navigation, ArrowRight, Phone, CloudRain, Check,
-  Layers, ExternalLink, Crosshair, AlertTriangle, MapPin, Plus, Search
+  Layers, ExternalLink, Crosshair, AlertTriangle, MapPin, Plus, Search, Thermometer, Wind
 } from 'lucide-react';
 import { HazardMarker, LocationId, WeatherData, UserGpsData, DisasterType } from '../types';
 import { smartGeocode, GeoResult } from '../hooks/useGeocoder';
+import { usePredictionEngine } from '../hooks/usePredictionEngine';
+import { PredictionControls } from './PredictionControls';
+import { PredictionDetailPanel } from './PredictionDetailPanel';
+import { Prediction, getRiskConfig } from '../types/prediction';
 
 // Fix Leaflet default icon paths (broken in Vite/webpack builds)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -158,22 +162,60 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
   const [routeError, setRouteError] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState<'street' | 'satellite'>('street');
 
+  // Prediction Engine State
+  const engine = usePredictionEngine();
+  const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null);
+
   // Custom live coordinate plotting states
   const [clickedLatLng, setClickedLatLng] = useState<{ lat: number; lng: number } | null>(null);
+  const [showPlotForm, setShowPlotForm] = useState(false);
+  const [probeWeather, setProbeWeather] = useState<{temp: number, precip: number, wind: number} | null>(null);
+  const [probeWeatherLoading, setProbeWeatherLoading] = useState(false);
+  
   const [plotType, setPlotType] = useState<'hazard' | 'shelter'>('hazard');
   const [plotName, setPlotName] = useState('Active Landslide / Flooding');
   const [plotRadius, setPlotRadius] = useState(1000);
   const [plotRisk, setPlotRisk] = useState(80);
 
+  useEffect(() => {
+    if (clickedLatLng) {
+      setProbeWeatherLoading(true);
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${clickedLatLng.lat}&longitude=${clickedLatLng.lng}&current=temperature_2m,precipitation,wind_speed_10m`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.current) {
+            setProbeWeather({
+              temp: data.current.temperature_2m,
+              precip: data.current.precipitation,
+              wind: data.current.wind_speed_10m,
+            });
+          } else {
+            setProbeWeather(null);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch open-meteo', err);
+          setProbeWeather(null);
+        })
+        .finally(() => setProbeWeatherLoading(false));
+    }
+  }, [clickedLatLng]);
+
   // Map Click Listener child component
   const MapClickHandler = () => {
-    useMapEvents({
+    const map = useMapEvents({
       click(e) {
         setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
+        setShowPlotForm(false);
         // Set context-aware defaults when opening plot form
         if (isOfficialAuthenticated) {
           setPlotName(plotType === 'shelter' ? 'GCC Resettlement Safe Camp' : 'Active Landslide / Flooding');
         }
+        
+        // Auto-pan to the clicked location to ensure the popup stays in view
+        // Adding a slight offset to the latitude to account for the popup height
+        const targetLat = e.latlng.lat + (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.15;
+        map.panTo([targetLat, e.latlng.lng]);
       }
     });
     return null;
@@ -438,10 +480,54 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
     ? '© Esri &mdash; Source: Esri, USGS, NOAA'
     : '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
+  let dynamicRisk = 40;
+  let dynamicThreat = 'NORMAL / LOW';
+  let isSevere = false;
+
+  if (probeWeatherLoading || !probeWeather) {
+    dynamicRisk = weather.imdAlertLevel === 'red' ? 85 : (weather.imdAlertLevel === 'orange' ? 65 : 40);
+    dynamicThreat = weather.imdAlertLevel === 'red' ? 'CYCLONE / SEVERE' : (weather.imdAlertLevel === 'orange' ? 'STORM / MODERATE' : 'NORMAL / LOW');
+    isSevere = weather.imdAlertLevel === 'red' || weather.imdAlertLevel === 'orange';
+  } else {
+    dynamicRisk = Math.min(100, Math.round(
+      (probeWeather.precip > 0 ? probeWeather.precip * 5 : 0) + 
+      (probeWeather.wind > 0 ? probeWeather.wind * 1.5 : 0) + 
+      15
+    ));
+    if (dynamicRisk > 70) {
+      dynamicThreat = 'CYCLONE / SEVERE';
+      isSevere = true;
+    } else if (dynamicRisk > 45) {
+      dynamicThreat = 'STORM / MODERATE';
+      isSevere = true;
+    }
+  }
+
   return (
     <div className="flex flex-col xl:flex-row gap-6 h-full">
       {/* ── MAP PANE ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[560px]">
+      <div className="flex-1 glass-panel rounded-xl p-4 flex flex-col min-h-[560px] relative">
+        
+        {/* Prediction Layers Controls & Panels */}
+        <PredictionControls 
+          isEngineEnabled={engine.isEngineEnabled}
+          setIsEngineEnabled={engine.setIsEngineEnabled}
+          forecastWindow={engine.forecastWindow}
+          setForecastWindow={engine.setForecastWindow}
+          enabledHazards={engine.enabledHazards}
+          toggleHazard={engine.toggleHazard}
+          minRiskThreshold={engine.minRiskThreshold}
+          setMinRiskThreshold={engine.setMinRiskThreshold}
+          dataHealth={engine.dataHealth}
+          refresh={engine.refresh}
+          loading={engine.loading}
+        />
+        
+        <PredictionDetailPanel 
+          prediction={selectedPrediction}
+          onClose={() => setSelectedPrediction(null)}
+        />
+
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
           <div className="flex items-center gap-2">
@@ -505,13 +591,43 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
             ref={mapRef}
             center={centre}
             zoom={zoom}
+            minZoom={2.5}
+            maxBounds={[[-90, -180], [90, 180]]}
+            maxBoundsViscosity={1.0}
             style={{ height: '100%', width: '100%', minHeight: '420px' }}
             scrollWheelZoom
             className="z-0"
           >
-            <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
+            <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} noWrap={true} />
             <MapRefSetter mapRef={mapRef} />
             <MapFlyTo centre={centre} zoom={zoom} />
+
+            {/* PREDICTION LAYERS (Dynamic Risk Models) */}
+            {engine.isEngineEnabled && engine.predictions
+              .filter(p => engine.enabledHazards.has(p.hazardType) && p.riskScore >= engine.minRiskThreshold)
+              .map(p => {
+                const config = getRiskConfig(p.riskScore);
+                return (
+                  <Circle
+                    key={p.id}
+                    center={[p.latitude, p.longitude]}
+                    radius={3500 + p.riskScore * 50} // dynamic radius
+                    pathOptions={{
+                      color: config.color,
+                      fillColor: config.color,
+                      fillOpacity: 0.25,
+                      weight: 2,
+                      dashArray: '5, 10', // dashed border distinguishes prediction from solid observation
+                    }}
+                    eventHandlers={{
+                      click: () => {
+                        setSelectedPrediction(p);
+                        setSelectedMarker(null); // clear observation selection
+                      }
+                    }}
+                  />
+                );
+              })}
 
             {/* Hazard & shelter markers */}
             {activeMarkers.map(m => {
@@ -638,103 +754,182 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
               <Popup
                 position={[clickedLatLng.lat, clickedLatLng.lng]}
                 eventHandlers={{ remove: () => setClickedLatLng(null) }}
-                className="leaflet-popup-dark animate-fade-in"
+                className="leaflet-popup-dark"
               >
-                <div className="p-2 min-w-[220px] font-mono text-xs text-slate-200">
-                  <div className="font-bold text-slate-100 uppercase tracking-wider mb-2 text-[10px] border-b border-slate-800 pb-1.5 flex items-center justify-between">
-                    <span>📍 Plot GPS Point</span>
-                    <span className={`text-[8px] px-1 py-0.2 rounded border font-black ${
-                      isOfficialAuthenticated 
-                        ? "bg-emerald-950 text-emerald-400 border-emerald-800/40" 
-                        : "bg-rose-950 text-rose-400 border-rose-800/40"
-                    }`}>
-                      {isOfficialAuthenticated ? "Authorized" : "Locked"}
-                    </span>
+                <div className="p-3 min-w-[280px] font-mono text-slate-200">
+                  <div className="flex items-start justify-between mb-3 border-b border-slate-800 pb-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-cyan-400 font-bold uppercase tracking-wider text-[11px]">
+                         <Crosshair className="w-3.5 h-3.5" /> LIVE COORDINATE PROBE
+                      </div>
+                      <div className="text-[9px] text-slate-400 mt-0.5">
+                        {Math.abs(clickedLatLng.lat).toFixed(4)}°{clickedLatLng.lat >= 0 ? 'N' : 'S'}, {Math.abs(clickedLatLng.lng).toFixed(4)}°{clickedLatLng.lng >= 0 ? 'E' : 'W'}
+                      </div>
+                    </div>
                   </div>
 
-                  {!isOfficialAuthenticated ? (
-                    <div className="text-[10px] text-rose-400 leading-relaxed py-1">
-                      ⚠️ ACCESS LOCKED: Authenticate as Higher Command Officer in the Demo Portal tab to enable live geospatial coordinate plotting.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex gap-1.5 border-b border-slate-900 pb-2">
-                        <button
-                          type="button"
-                          onClick={() => { setPlotType('hazard'); setPlotName('Active Landslide / Flooding'); }}
-                          className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
-                            plotType === 'hazard' ? 'bg-rose-500 text-slate-950 border-rose-400' : 'bg-slate-900 text-slate-450 border-slate-800'
-                          }`}
-                        >
-                          Threat
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setPlotType('shelter'); setPlotName('GCC Resettlement Safe Camp'); }}
-                          className={`flex-1 py-1 rounded text-[8px] uppercase font-black border transition-all cursor-pointer ${
-                            plotType === 'shelter' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-450 border-slate-800'
-                          }`}
-                        >
-                          Safe Haven
-                        </button>
+                  {!showPlotForm ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="text-center flex flex-col items-center">
+                          <Thermometer className="w-3.5 h-3.5 text-amber-500 mb-1" />
+                          <span className="text-[10px] font-bold text-white">
+                            {probeWeatherLoading ? '...' : (probeWeather ? `${probeWeather.temp.toFixed(1)}°C` : 'N/A')}
+                          </span>
+                          <span className="text-[8px] text-slate-500 uppercase">Temp</span>
+                        </div>
+                        <div className="text-center flex flex-col items-center">
+                          <CloudRain className="w-3.5 h-3.5 text-blue-500 mb-1" />
+                          <span className="text-[10px] font-bold text-white">
+                            {probeWeatherLoading ? '...' : (probeWeather ? `${probeWeather.precip.toFixed(1)} mm/h` : 'N/A')}
+                          </span>
+                          <span className="text-[8px] text-slate-500 uppercase">Precip</span>
+                        </div>
+                        <div className="text-center flex flex-col items-center">
+                          <Wind className="w-3.5 h-3.5 text-slate-400 mb-1" />
+                          <span className="text-[10px] font-bold text-white">
+                            {probeWeatherLoading ? '...' : (probeWeather ? `${probeWeather.wind.toFixed(1)} km/h` : 'N/A')}
+                          </span>
+                          <span className="text-[8px] text-slate-500 uppercase">Wind</span>
+                        </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-[8px] text-slate-500 uppercase block">Label Name</label>
+                      <div className="bg-slate-900/60 border border-slate-800 rounded p-2 mb-3 flex items-center justify-between">
+                        <div>
+                          <div className="text-[8px] text-slate-500 uppercase tracking-wider">Calculated Hazard Threat</div>
+                          <div className="text-xs font-bold text-white">{dynamicThreat}</div>
+                        </div>
+                        <div className={`px-2 py-1 rounded font-black text-[10px] ${isSevere ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                          Risk {dynamicRisk}/100
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isOfficialAuthenticated) {
+                              alert("⚠️ ACCESS LOCKED: Authenticate as Higher Command Officer in the Demo Portal tab to enable live geospatial coordinate plotting.");
+                              return;
+                            }
+                            registerCustomMarker({
+                              id: `hazard-custom-${Date.now()}`,
+                              name: dynamicThreat,
+                              locationId: locationId,
+                              risk: dynamicRisk,
+                              status: isSevere ? 'danger' : 'warning',
+                              details: 'Live plotted geographical threat incident.',
+                              population: 250,
+                              lat: clickedLatLng.lat,
+                              lng: clickedLatLng.lng,
+                              radius: 1000,
+                            });
+                            setClickedLatLng(null);
+                          }}
+                          className="flex-1 py-1.5 rounded bg-rose-900/40 border border-rose-500/50 text-rose-300 font-bold text-[9px] uppercase tracking-wider transition-colors hover:bg-rose-900/80"
+                        >
+                          + Threat
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isOfficialAuthenticated) {
+                              alert("⚠️ ACCESS LOCKED: Authenticate as Higher Command Officer in the Demo Portal tab to enable live geospatial coordinate plotting.");
+                              return;
+                            }
+                            registerCustomMarker({
+                              id: `shelter-custom-${Date.now()}`,
+                              name: 'Safe Refuge Camp',
+                              locationId: locationId,
+                              risk: 2,
+                              status: 'safe',
+                              details: 'Live provisioned safe shelter.',
+                              population: 0,
+                              lat: clickedLatLng.lat,
+                              lng: clickedLatLng.lng,
+                            });
+                            setClickedLatLng(null);
+                          }}
+                          className="flex-1 py-1.5 rounded bg-emerald-900/40 border border-emerald-500/50 text-emerald-300 font-bold text-[9px] uppercase tracking-wider transition-colors hover:bg-emerald-900/80"
+                        >
+                          + Refuge
+                        </button>
+                      </div>
+                      <div className="flex">
+                        <button
+                          type="button"
+                          onClick={() => setClickedLatLng(null)}
+                          className="w-full py-1.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-bold text-[9px] uppercase tracking-wider transition-colors hover:bg-slate-700"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-[10px] text-slate-400 uppercase tracking-wider">Setup Provisioning</div>
+                      <div>
+                        <label className="block text-[10px] text-slate-500 mb-1">Marker Type</label>
+                        <div className="flex rounded bg-slate-800 p-1">
+                          <button
+                            type="button"
+                            className={`flex-1 py-1 text-[10px] font-bold rounded ${plotType === 'hazard' ? 'bg-rose-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                            onClick={() => { setPlotType('hazard'); setPlotName('Active Landslide / Flooding'); }}
+                          >
+                            Threat
+                          </button>
+                          <button
+                            type="button"
+                            className={`flex-1 py-1 text-[10px] font-bold rounded ${plotType === 'shelter' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                            onClick={() => { setPlotType('shelter'); setPlotName('GCC Resettlement Safe Camp'); }}
+                          >
+                            Shelter
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[10px] text-slate-500 mb-1">Designation</label>
                         <input
                           type="text"
                           value={plotName}
                           onChange={(e) => setPlotName(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none"
+                          className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
                         />
                       </div>
 
-                      {plotType === 'hazard' && (
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <div className="space-y-1">
-                            <label className="text-[8px] text-slate-500 uppercase block">Radius (m)</label>
-                            <input
-                              type="number"
-                              value={plotRadius}
-                              onChange={(e) => setPlotRadius(Number(e.target.value))}
-                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none font-mono"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[8px] text-slate-500 uppercase block">Risk %</label>
-                            <input
-                              type="number"
-                              value={plotRisk}
-                              onChange={(e) => setPlotRisk(Number(e.target.value))}
-                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-[10px] text-slate-200 focus:outline-none font-mono"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const markerId = `${plotType}-custom-${Date.now()}`;
-                          const newMarker: HazardMarker = {
-                            id: markerId,
-                            name: plotName || (plotType === 'shelter' ? 'Safe Haven Camp' : 'Custom Threat'),
-                            locationId: locationId,
-                            risk: plotType === 'shelter' ? 2 : plotRisk,
-                            status: plotType === 'shelter' ? 'safe' : (plotRisk > 75 ? 'danger' : 'warning'),
-                            details: plotType === 'shelter' ? 'Live plotted government resettlement refuge camp.' : 'Live plotted geographical threat incident.',
-                            population: plotType === 'shelter' ? 0 : 250,
-                            lat: clickedLatLng.lat,
-                            lng: clickedLatLng.lng,
-                            radius: plotRadius,
-                          };
-                          registerCustomMarker(newMarker);
-                          setClickedLatLng(null);
-                        }}
-                        className="w-full py-1.5 mt-1 rounded bg-cyan-400 hover:bg-cyan-500 text-slate-950 font-black text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
-                      >
-                        Confirm Placement
-                      </button>
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const markerId = `${plotType}-custom-${Date.now()}`;
+                            const newMarker: HazardMarker = {
+                              id: markerId,
+                              name: plotName,
+                              locationId: locationId,
+                              risk: plotType === 'hazard' ? plotRisk : 2,
+                              status: plotType === 'hazard' ? 'danger' : 'safe',
+                              details: plotType === 'hazard' ? 'Live plotted geographical threat incident.' : 'Live provisioned safe shelter.',
+                              population: plotType === 'hazard' ? 250 : 0,
+                              lat: clickedLatLng.lat,
+                              lng: clickedLatLng.lng,
+                              radius: plotType === 'hazard' ? plotRadius : undefined,
+                            };
+                            registerCustomMarker(newMarker);
+                            setClickedLatLng(null);
+                          }}
+                          className={`flex-1 py-1.5 rounded font-bold text-[10px] uppercase tracking-wider text-white ${plotType === 'hazard' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                        >
+                          Confirm Plot
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowPlotForm(false)}
+                          className="py-1.5 px-3 rounded bg-slate-800 border border-slate-700 text-slate-300 font-bold text-[10px] uppercase tracking-wider hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -760,6 +955,11 @@ export const TabGisMap: React.FC<TabGisMapProps> = ({
           {userGps && (
             <span className="flex items-center gap-1.5 text-blue-300">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-400 ring-2 ring-blue-300/40" />Your GPS
+            </span>
+          )}
+          {engine.isEngineEnabled && (
+            <span className="flex items-center gap-1.5 text-cyan-400 ml-auto border-l border-slate-700 pl-4">
+              <span className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-cyan-500 bg-cyan-500/30" />Predicted Risk
             </span>
           )}
         </div>

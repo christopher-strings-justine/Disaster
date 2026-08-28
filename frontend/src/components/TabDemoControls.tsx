@@ -24,14 +24,14 @@ interface TabDemoControlsProps {
   deleteAnnouncement: (id: string) => void;
   isOfficialAuthenticated: boolean;
   authenticateOfficial: (pin: string) => boolean;
-  registerShelter: (name: string, locationId: LocationId, lat: number, lng: number, capacity: number) => void;
-  registerResponder: (name: string, type: 'Police' | 'Fire' | 'Medical' | 'NGO', location: string) => void;
+  registerShelter: (name: string, locationId: LocationId, lat: number, lng: number, capacity: number, hospitalBeds: number, personnelCount: number) => void;
+  registerResponder: (name: string, type: 'Police' | 'Fire' | 'Medical' | 'NGO', location: string, vehicleCount: number, personnelSize: number) => void;
   logoutOfficial: () => void;
   severityRadius: number;
   setSeverityRadius: (val: number) => void;
   markers: HazardMarker[];
   clearHazard: (id: string) => void;
-  registerCustomMarker: (marker: HazardMarker) => void;
+  registerCustomMarker: (marker: HazardMarker, shelterProps?: { hospitalBeds: number; personnelCount: number }) => void;
 }
 
 export const TabDemoControls: React.FC<TabDemoControlsProps> = ({

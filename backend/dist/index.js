@@ -14,7 +14,12 @@ dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
 app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
+app.use((req, res, next) => {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+    next();
+});
 // Routes
 app.use('/api/vision', visionRoutes_1.default);
 app.get('/api/health', (req, res) => {
@@ -44,6 +49,10 @@ app.post('/api/disasters/sync', async (req, res) => {
     }
 });
 // Start Server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
+// Force event loop to stay alive in case some dependency is unref-ing the server
+setInterval(() => {
+    // heartbeat
+}, 60000);
